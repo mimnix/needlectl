@@ -1,0 +1,14 @@
+# Build artifacts
+/bin/
+coverage.out
+coverage.html
+
+# Personal playlist exports: keep local, never commit
+*.csv
+!internal/playlist/testdata/*.csv
+
+# Local tooling / editor
+.tmp/
+.DS_Store
+
+.opencode

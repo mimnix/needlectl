@@ -1,0 +1,89 @@
+# mise-en-place configuration for needlectl.
+#
+# Usage:
+#   mise install        # install the Go toolchain
+#   mise run build      # compile ./bin/needlectl
+#   mise run test       # run the unit tests
+#   mise run ci         # lint + test + build
+#   mise tasks          # list every task
+#
+# The Go version here is the single source of truth for local development;
+# keep the `go` directive in go.mod in sync with it.
+
+[tools]
+go = "1.27"
+
+[env]
+CGO_ENABLED = "0"
+GOFLAGS = "-trimpath"
+
+[tasks.build]
+description = "Compile the needlectl binary into ./bin"
+run = '''
+set -euo pipefail
+VERSION="$(git describe --tags --always --dirty 2>/dev/null || echo dev)"
+mkdir -p ./bin
+go build -ldflags "-s -w -X github.com/mimmo/needlectl/cmd.version=${VERSION}" -o ./bin/needlectl .
+echo "built ./bin/needlectl (${VERSION})"
+'''
+sources = ["**/*.go", "go.mod", "go.sum"]
+outputs = ["./bin/needlectl"]
+
+[tasks.run]
+description = "Build and run needlectl (pass arguments with: mise run run -- import file.csv)"
+depends = ["build"]
+run = "./bin/needlectl"
+
+[tasks.test]
+description = "Run the unit tests"
+run = "go test ./..."
+
+[tasks."test:race"]
+description = "Run the unit tests with the race detector"
+env = { CGO_ENABLED = "1" }
+run = "go test -race ./..."
+
+[tasks.cover]
+description = "Run the unit tests and write an HTML coverage report"
+run = '''
+set -euo pipefail
+go test -coverprofile=coverage.out ./...
+go tool cover -func=coverage.out
+go tool cover -html=coverage.out -o coverage.html
+echo "report: coverage.html"
+'''
+
+[tasks.lint]
+description = "Run go vet and check formatting"
+run = '''
+set -euo pipefail
+go vet ./...
+unformatted="$(gofmt -l .)"
+if [ -n "${unformatted}" ]; then
+  echo "the following files are not gofmt-formatted:" >&2
+  echo "${unformatted}" >&2
+  exit 1
+fi
+echo "lint ok"
+'''
+
+[tasks.fmt]
+description = "Format all Go sources"
+run = "gofmt -w ."
+
+[tasks.tidy]
+description = "Sync go.mod/go.sum"
+run = "go mod tidy"
+
+[tasks.install]
+description = "Install needlectl into GOBIN/GOPATH"
+run = "go install ."
+
+[tasks.clean]
+description = "Remove build and coverage artifacts"
+run = "rm -rf ./bin coverage.out coverage.html"
+
+[tasks.ci]
+description = "Lint, test (with the race detector) and build"
+depends = ["lint", "test:race", "build"]
+run = 'echo "ci ok"'
