@@ -464,6 +464,66 @@ func TestDeleteAlbumSendsOptions(t *testing.T) {
 	}
 }
 
+func TestSearchLibraryTracksSendsQuery(t *testing.T) {
+	var gotQuery string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.Query().Get("q")
+		offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+		writeJSON(t, w, libraryTracksResponse{
+			Items:  []LibraryTrack{{ID: "track-1", Title: "Disorder"}},
+			Total:  1,
+			Offset: offset,
+			Limit:  200,
+		})
+	}))
+	defer server.Close()
+
+	client, err := New(server.URL, false)
+	if err != nil {
+		t.Fatalf("New returned error: %v", err)
+	}
+
+	tracks, err := client.SearchLibraryTracks(context.Background(), "Disorder")
+	if err != nil {
+		t.Fatalf("SearchLibraryTracks returned error: %v", err)
+	}
+	if gotQuery != "Disorder" {
+		t.Errorf("q = %q, want Disorder", gotQuery)
+	}
+	if len(tracks) != 1 || tracks[0].ID != "track-1" {
+		t.Errorf("tracks = %+v", tracks)
+	}
+}
+
+func TestDeleteTrack(t *testing.T) {
+	var method, path string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		method = r.Method
+		path = r.URL.Path
+		writeJSON(t, w, CatalogRemovalResponse{Success: true, ID: "track-1", RemovedTrackIDs: []string{"track-1"}})
+	}))
+	defer server.Close()
+
+	client, err := New(server.URL, false)
+	if err != nil {
+		t.Fatalf("New returned error: %v", err)
+	}
+
+	removal, err := client.DeleteTrack(context.Background(), "track-1")
+	if err != nil {
+		t.Fatalf("DeleteTrack returned error: %v", err)
+	}
+	if method != http.MethodDelete {
+		t.Errorf("method = %q, want DELETE", method)
+	}
+	if path != "/api/v1/library/tracks/track-1" {
+		t.Errorf("path = %q", path)
+	}
+	if len(removal.RemovedTrackIDs) != 1 {
+		t.Errorf("removed tracks = %v, want 1", removal.RemovedTrackIDs)
+	}
+}
+
 func writeJSON(t *testing.T, w http.ResponseWriter, payload any) {
 	t.Helper()
 	w.Header().Set("Content-Type", "application/json")

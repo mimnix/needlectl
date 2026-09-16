@@ -117,20 +117,33 @@ func (c *Client) Me(ctx context.Context) (*User, error) {
 	return &user, nil
 }
 
-// ListLibraryTracks returns every track of the native library, following
-// pagination until the reported total is reached.
+// ListLibraryTracks returns every track of the native library.
 func (c *Client) ListLibraryTracks(ctx context.Context) ([]LibraryTrack, error) {
+	return c.listLibraryTracks(ctx, "")
+}
+
+// SearchLibraryTracks returns the library tracks matching query. An empty query
+// lists every track.
+func (c *Client) SearchLibraryTracks(ctx context.Context, query string) ([]LibraryTrack, error) {
+	return c.listLibraryTracks(ctx, query)
+}
+
+// listLibraryTracks follows pagination until the reported total is reached.
+func (c *Client) listLibraryTracks(ctx context.Context, search string) ([]LibraryTrack, error) {
 	var all []LibraryTrack
 	offset := 0
 	total := 0
 	complete := false
 
 	for page := 0; page < maxLibraryPages; page++ {
-		query := url.Values{}
-		query.Set("limit", strconv.Itoa(libraryPageSize))
-		query.Set("offset", strconv.Itoa(offset))
+		params := url.Values{}
+		params.Set("limit", strconv.Itoa(libraryPageSize))
+		params.Set("offset", strconv.Itoa(offset))
+		if trimmed := strings.TrimSpace(search); trimmed != "" {
+			params.Set("q", trimmed)
+		}
 
-		data, err := c.do(ctx, http.MethodGet, "/api/v1/library/tracks?"+query.Encode(), nil)
+		data, err := c.do(ctx, http.MethodGet, "/api/v1/library/tracks?"+params.Encode(), nil)
 		if err != nil {
 			return nil, err
 		}
@@ -139,7 +152,7 @@ func (c *Client) ListLibraryTracks(ctx context.Context) ([]LibraryTrack, error) 
 			return nil, fmt.Errorf("decode library tracks: %w", err)
 		}
 		if page > 0 && resp.Offset != offset {
-			return nil, fmt.Errorf("library listing returned offset %d for requested offset %d; refusing to import from an inconsistent library", resp.Offset, offset)
+			return nil, fmt.Errorf("library listing returned offset %d for requested offset %d; refusing to work from an inconsistent library", resp.Offset, offset)
 		}
 
 		total = resp.Total
@@ -156,7 +169,7 @@ func (c *Client) ListLibraryTracks(ctx context.Context) ([]LibraryTrack, error) 
 	}
 
 	if !complete {
-		return nil, fmt.Errorf("library listing was truncated after %d pages (%d of %d tracks); refusing to import from an incomplete library", maxLibraryPages, len(all), total)
+		return nil, fmt.Errorf("library listing was truncated after %d pages (%d of %d tracks); refusing to work from an incomplete library", maxLibraryPages, len(all), total)
 	}
 	return all, nil
 }
@@ -228,6 +241,23 @@ func (c *Client) DeleteAlbum(ctx context.Context, albumID string, deleteFiles, s
 	var resp CatalogRemovalResponse
 	if err := json.Unmarshal(data, &resp); err != nil {
 		return nil, fmt.Errorf("decode album removal: %w", err)
+	}
+	return &resp, nil
+}
+
+// DeleteTrack removes a single track from the library.
+//
+// The DroppedNeedle endpoint has no catalog-only variant: the backing file is
+// always deleted from disk.
+func (c *Client) DeleteTrack(ctx context.Context, trackID string) (*CatalogRemovalResponse, error) {
+	path := "/api/v1/library/tracks/" + url.PathEscape(trackID)
+	data, err := c.do(ctx, http.MethodDelete, path, nil)
+	if err != nil {
+		return nil, err
+	}
+	var resp CatalogRemovalResponse
+	if err := json.Unmarshal(data, &resp); err != nil {
+		return nil, fmt.Errorf("decode track removal: %w", err)
 	}
 	return &resp, nil
 }
