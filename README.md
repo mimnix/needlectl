@@ -24,6 +24,9 @@ were imported before the track was available are relinked once it appears.
 - **Album deletion** — `needlectl album delete` resolves an album by name
   (refusing ambiguous matches), cascades to all of its tracks, and removes the
   files from disk unless `--keep-files` is given.
+- **Track deletion** — `needlectl track delete` resolves a single track by name
+  (refusing ambiguous matches) and removes it. Note that the DroppedNeedle API
+  always deletes the track's file from disk for this operation.
 - **`login` command** that stores credentials in `~/.needlectl.conf` (written
   `0600`).
 - **Clean, informative output** with coloured progress and a summary; `--dry-run`
@@ -195,6 +198,52 @@ Flags:
 > **Warning:** by default the audio files are deleted from disk. Pass
 > `--keep-files` to remove only the catalog entry, and `--dry-run` to preview.
 
+### `needlectl track delete <track>`
+
+Deletes a single track from the library. The track is looked up by name and must
+match **exactly one** library track; use `--artist` and/or `--album` to narrow
+the search, or `--id` for an exact track id.
+
+```
+$ needlectl track delete "Rising Hope" --artist "LiSA"
+› Authenticating with https://music.example.com
+✓ Signed in as Admin (admin)
+› Looking up track "Rising Hope" in the library
+
+  track:       Rising Hope — LiSA
+  id:          5a1e…
+  album:       Launcher
+  details:     MP3 · 4:20
+
+! this permanently deletes the track and its file from disk; DroppedNeedle has no catalog-only option for a single track
+Delete Rising Hope — LiSA? [y/N]: y
+› Deleting track Rising Hope — LiSA
+
+✓ Track deleted
+  track:       Rising Hope — LiSA
+  removed:     1
+  file:        deleted from disk
+```
+
+If several tracks match, the candidates (id, title, artist and album) are listed
+and nothing is deleted. Use `--dry-run` to see what would happen without
+deleting anything.
+
+Flags:
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--id` | `false` | Treat the argument as an exact track id and skip the lookup. |
+| `--artist string` | | Restrict the lookup to this artist. |
+| `--album string` | | Restrict the lookup to this album. |
+| `-y, --yes` | `false` | Do not ask for confirmation (required in non-interactive sessions). |
+| `--dry-run` | `false` | Show what would be deleted without deleting anything. |
+
+> **Warning:** the DroppedNeedle track-removal endpoint has **no catalog-only
+> variant**, so deleting a track always deletes its file from disk. If you only
+> want to drop catalog entries, use `album delete --keep-files` (album scope)
+> instead.
+
 ## CSV format
 
 The parser accepts the Spotify "library" export format and similar files. The
@@ -310,7 +359,7 @@ Endpoints used, all under `/api/v1`:
 |---------------|---------|
 | `POST /auth/login` | `{username, password}` → `{token, user}` |
 | `GET /auth/me` | Verify the session |
-| `GET /library/tracks?limit=&offset=` | Native library listing (max 200 per page) |
+| `GET /library/tracks?q=&limit=&offset=` | Native library listing / track search (max 200 per page) |
 | `GET /playlists` | List playlists |
 | `POST /playlists` | `{name}` → create a playlist |
 | `GET /playlists/{id}` | Playlist with tracks |
@@ -320,6 +369,7 @@ Endpoints used, all under `/api/v1`:
 | `GET /library/albums?q=&page=&page_size=` | Search the library albums |
 | `GET /library/albums/{id}` | Album detail (used by `album delete --id`) |
 | `DELETE /library/album/{id}?delete_files=&stop_wanted=` | Remove an album and cascade its tracks |
+| `DELETE /library/tracks/{id}` | Remove a single track (always deletes its file) |
 
 Authentication uses `Authorization: Bearer <token>`. An entry is considered
 *linked* when it has a `library_file_id`, a `track_source_id`, or a non-empty
@@ -328,6 +378,9 @@ Authentication uses `Authorization: Bearer <token>`. An entry is considered
 > `DELETE /library/album/{id}` is admin-only. `delete_files` defaults to `false`
 > on the API, but `needlectl` defaults to deleting files and requires
 > `--keep-files` to opt out.
+>
+> `DELETE /library/tracks/{id}` requires the curator role (admin satisfies it)
+> and accepts no options: the track's file is always deleted from disk.
 
 ## Development
 
@@ -355,12 +408,14 @@ cmd/
   login.go                   interactive login
   import.go                  import command and summary
   album.go                   album delete command and confirmation
+  track.go                   track delete command and confirmation
 internal/
   config/                    ~/.needlectl.conf load/save/validation
   api/                       typed DroppedNeedle REST client
   playlist/                  CSV parser
   matcher/                   normalization + library matching
   albums/                    album query resolution (unique-match only)
+  tracks/                    track query resolution (unique-match only)
   importer/                  pure import plan + orchestration
   output/                    coloured, structured terminal output
 ```
@@ -381,6 +436,7 @@ runner with an in-memory fake API.
 | Most tracks show as `unlinked` | The tracks are not in the DroppedNeedle library yet. Scan the library, then re-run the import — it will relink them. |
 | `library listing was truncated` / offset mismatch | The server returned inconsistent pagination; the import refuses to run against a partial library. Re-run once the instance is healthy. |
 | `refusing to guess: narrow the search with --artist or pass --id` | More than one album matched. Re-run with `--artist`, or copy the id from the listed candidates and use `--id`. |
+| `refusing to guess: narrow the search with --artist/--album or pass --id` | More than one track matched. Re-run with `--artist`/`--album`, or copy the id from the listed candidates and use `--id`. |
 | `refusing to delete without confirmation; re-run with --yes` | The album delete ran without a terminal. Pass `--yes` to confirm non-interactively. |
 | `too many albums match …` | The album query was too broad to page through. Refine the query or use `--id`. |
 | A duplicate entry appears after an interrupted run | The refresh inserts before removing; re-run the import to reconcile. |
@@ -398,6 +454,9 @@ exports and `~/.needlectl.conf` private.
 - `album delete` requires an admin account and is irreversible: by default it
   deletes the files from disk. It refuses to act when an album name is
   ambiguous, so it never deletes the wrong album.
+- `track delete` requires the curator role and always deletes the file from
+  disk: the API exposes no catalog-only variant for a single track. It refuses
+  to act when a track name is ambiguous.
 - Duration is stored but not used as a matching guard, so live/remix versions
   with very similar titles could be linked to the wrong file.
 - The password is stored in plain text in a `0600` file; an OS keyring backend
