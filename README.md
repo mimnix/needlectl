@@ -26,8 +26,10 @@ were imported before the track was available are relinked once it appears.
   (refusing ambiguous matches), cascades to all of its tracks, and removes the
   files from disk unless `--keep-files` is given.
 - **Track deletion** — `needlectl track delete` resolves a single track by name
-  (refusing ambiguous matches) and removes it. Note that the DroppedNeedle API
-  always deletes the track's file from disk for this operation.
+  (refusing ambiguous matches; same-named tracks on one album are shown with
+  their disc/track number and picked with `--track`/`--disc`) and removes it.
+  Note that the DroppedNeedle API always deletes the track's file from disk for
+  this operation.
 - **Playlist relinking** — `needlectl playlist relink` scans an existing playlist
   and links the entries that have no source yet to matching library files. Entries
   that already play are left untouched, so a working link is never replaced.
@@ -206,7 +208,8 @@ Flags:
 
 Deletes a single track from the library. The track is looked up by name and must
 match **exactly one** library track; use `--artist` and/or `--album` to narrow
-the search, or `--id` for an exact track id.
+the search, `--track`/`--disc` to pick between tracks that share a name on one
+album, or `--id` for an exact track id.
 
 ```
 $ needlectl track delete "Rising Hope" --artist "LiSA"
@@ -217,6 +220,7 @@ $ needlectl track delete "Rising Hope" --artist "LiSA"
   track:       Rising Hope — LiSA
   id:          5a1e…
   album:       Launcher
+  position:    track 1
   details:     MP3 · 4:20
 
 ! this permanently deletes the track and its file from disk; DroppedNeedle has no catalog-only option for a single track
@@ -229,17 +233,43 @@ Delete Rising Hope — LiSA? [y/N]: y
   file:        deleted from disk
 ```
 
-If several tracks match, the candidates (id, title, artist and album) are listed
-and nothing is deleted. Use `--dry-run` to see what would happen without
-deleting anything.
+### Tracks that share a name on the same album
+
+`--artist` and `--album` cannot tell two same-named tracks on one album apart, so
+when the matches all sit on the same album the command refuses and lists them
+with their disc/track number, format and duration. Nothing is deleted until you
+point at one:
+
+```
+$ needlectl track delete "Intro" --album "Launcher"
+› Looking up track "Intro" in the library
+! "Intro" matches 2 tracks:
+  entry-1  Intro — LiSA (Launcher) · track 3 · FLAC · 3:35
+  entry-2  Intro — LiSA (Launcher) · track 7 · FLAC · 3:41
+needlectl: refusing to guess: these matches share the album — re-run with --track (and --disc if the number repeats across discs), or pass --id
+
+$ needlectl track delete "Intro" --album "Launcher" --track 7
+› Looking up track "Intro" in the library
+
+  track:       Intro — LiSA
+  id:          entry-2
+  album:       Launcher
+  position:    track 7
+  details:     FLAC · 3:41
+```
+
+For a multi-disc album, add `--disc` as well. If two rows share a name *and* a
+disc/track number they are indistinguishable, and only `--id` can select one.
 
 Flags:
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--id` | `false` | Treat the argument as an exact track id and skip the lookup. |
+| `--id` | `false` | Treat the argument as an exact track id and skip the lookup. Cannot be combined with the narrowing flags below. |
 | `--artist string` | | Restrict the lookup to this artist. |
 | `--album string` | | Restrict the lookup to this album. |
+| `--track int` | `0` | Restrict the lookup to this track number. |
+| `--disc int` | `0` | Restrict the lookup to this disc number. |
 | `-y, --yes` | `false` | Do not ask for confirmation (required in non-interactive sessions). |
 | `--dry-run` | `false` | Show what would be deleted without deleting anything. |
 
@@ -536,7 +566,9 @@ is tested with `httptest` and each runner with an in-memory fake API.
 | Most tracks show as `unlinked` | The tracks are not in the DroppedNeedle library yet. Scan the library, then re-run the import — it will relink them. |
 | `library listing was truncated` / offset mismatch | The server returned inconsistent pagination; the import refuses to run against a partial library. Re-run once the instance is healthy. |
 | `refusing to guess: narrow the search with --artist or pass --id` | More than one album matched. Re-run with `--artist`, or copy the id from the listed candidates and use `--id`. |
-| `refusing to guess: narrow the search with --artist/--album or pass --id` | More than one track matched. Re-run with `--artist`/`--album`, or copy the id from the listed candidates and use `--id`. |
+| `refusing to guess: narrow the search with --artist/--album, or pass --id` | More than one track matched across albums. Re-run with `--artist`/`--album`, or copy the id from the listed candidates and use `--id`. |
+| `refusing to guess: these matches share the album …` | Same-named tracks on one album, where `--artist`/`--album` cannot help. Re-run with `--track` (add `--disc` for multi-disc albums), or copy the id and use `--id`. |
+| `--id cannot be combined with --artist, --album, --track or --disc` | `--id` skips the lookup, so the narrowing flags would be silently ignored. Pass one or the other. |
 | `refusing to delete without confirmation; re-run with --yes` | The album delete ran without a terminal. Pass `--yes` to confirm non-interactively. |
 | `too many albums match …` | The album query was too broad to page through. Refine the query or use `--id`. |
 | `playlist "…" not found` | Check the name (`needlectl playlist relink` matches case-insensitively), or pass the id with `--id`. |
@@ -560,7 +592,9 @@ exports and `~/.needlectl.conf` private.
   ambiguous, so it never deletes the wrong album.
 - `track delete` requires the curator role and always deletes the file from
   disk: the API exposes no catalog-only variant for a single track. It refuses
-  to act when a track name is ambiguous.
+  to act when a track name is ambiguous, and lists the candidates with their
+  album, disc/track number, format and duration so a same-named track on the same
+  album can be selected with `--track`/`--disc` instead of guessed at.
 - `playlist relink` only touches entries that have no source at all. Entries that
   play through another source (Navidrome, Plex, Jellyfin) already have a link, so
   they are never re-pointed at the local library.

@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/mimmo/needlectl/internal/api"
+	"github.com/mimmo/needlectl/internal/matcher"
 	"github.com/mimmo/needlectl/internal/output"
 	"github.com/mimmo/needlectl/internal/tracks"
 	"github.com/spf13/cobra"
@@ -29,8 +30,22 @@ type trackDeleteOptions struct {
 	byID     bool
 	artist   string
 	album    string
+	track    int
+	disc     int
 	yes      bool
 	dryRun   bool
+}
+
+// validate rejects flag combinations that would silently ignore part of the
+// request on a destructive command.
+func (i trackDeleteOptions) validate() error {
+	if !i.byID {
+		return nil
+	}
+	if strings.TrimSpace(i.artist) != "" || strings.TrimSpace(i.album) != "" || i.track > 0 || i.disc > 0 {
+		return errors.New("--id cannot be combined with --artist, --album, --track or --disc")
+	}
+	return nil
 }
 
 func newTrackDeleteCommand(opts *globalOptions) *cobra.Command {
@@ -45,8 +60,13 @@ WARNING: the DroppedNeedle API has no catalog-only option for a single track,
 so the audio file is always deleted from disk. Use "album delete --keep-files"
 if you only want to remove catalog entries.
 
-The track is looked up by name and must match exactly one library track; use
---artist and/or --album to narrow the search, or --id to pass an exact track id.
+The track is looked up by name and must match exactly one library track. Use
+--artist and/or --album to narrow the search, --track (and --disc when the same
+track number appears on several discs) to pick between tracks that share a name
+on one album, or --id to pass an exact track id.
+
+When several tracks match, they are listed with their album, disc/track number,
+format and duration so they can be told apart; nothing is deleted.
 
 Deletion is confirmed interactively unless --yes is given. In a non-interactive
 session --yes is required.`,
@@ -60,6 +80,8 @@ session --yes is required.`,
 	cmd.Flags().BoolVar(&input.byID, "id", false, "treat the argument as an exact track id and skip the library lookup")
 	cmd.Flags().StringVar(&input.artist, "artist", "", "restrict the track lookup to this artist")
 	cmd.Flags().StringVar(&input.album, "album", "", "restrict the track lookup to this album")
+	cmd.Flags().IntVar(&input.track, "track", 0, "restrict the track lookup to this track number")
+	cmd.Flags().IntVar(&input.disc, "disc", 0, "restrict the track lookup to this disc number")
 	cmd.Flags().BoolVarP(&input.yes, "yes", "y", false, "do not ask for confirmation")
 	cmd.Flags().BoolVar(&input.dryRun, "dry-run", false, "show what would be deleted without deleting anything")
 
@@ -67,6 +89,10 @@ session --yes is required.`,
 }
 
 func runTrackDelete(cmd *cobra.Command, opts *globalOptions, input trackDeleteOptions) error {
+	if err := input.validate(); err != nil {
+		return err
+	}
+
 	printer := opts.printer()
 
 	cfg, err := opts.loadConfig(printer)
@@ -142,7 +168,12 @@ func resolveTrackTarget(cmd *cobra.Command, printer *output.Printer, client *api
 		return tracks.Track{}, fmt.Errorf("search tracks: %w", err)
 	}
 
-	resolved, err := tracks.Resolve(input.argument, input.artist, input.album, toTracks(found))
+	resolved, err := tracks.Resolve(input.argument, tracks.Criteria{
+		Artist: input.artist,
+		Album:  input.album,
+		Track:  input.track,
+		Disc:   input.disc,
+	}, toTracks(found))
 	if err != nil {
 		var ambiguous *tracks.AmbiguousError
 		if errors.As(err, &ambiguous) {
@@ -150,11 +181,36 @@ func resolveTrackTarget(cmd *cobra.Command, printer *output.Printer, client *api
 			for _, match := range ambiguous.Matches {
 				printer.Info("%s  %s", match.ID, trackCandidateLabel(match))
 			}
-			return tracks.Track{}, errors.New("refusing to guess: narrow the search with --artist/--album or pass --id")
+			return tracks.Track{}, errors.New(ambiguityHint(ambiguous.Matches))
 		}
 		return tracks.Track{}, err
 	}
 	return resolved, nil
+}
+
+// ambiguityHint points at the flag that can actually break the tie. --artist and
+// --album are useless when every match sits on the same album.
+func ambiguityHint(matches []tracks.Track) string {
+	if shareAlbum(matches) {
+		return "refusing to guess: these matches share the album — re-run with --track (and --disc if the number repeats across discs), or pass --id"
+	}
+	return "refusing to guess: narrow the search with --artist/--album, or pass --id"
+}
+
+func shareAlbum(matches []tracks.Track) bool {
+	if len(matches) < 2 {
+		return false
+	}
+	album := matcher.Normalize(matches[0].AlbumName)
+	if album == "" {
+		return false
+	}
+	for _, match := range matches[1:] {
+		if matcher.Normalize(match.AlbumName) != album {
+			return false
+		}
+	}
+	return true
 }
 
 func confirmTrackDeletion(cmd *cobra.Command, printer *output.Printer, target tracks.Track) (bool, error) {
@@ -189,6 +245,9 @@ func printTrackTarget(printer *output.Printer, target tracks.Track) {
 	if strings.TrimSpace(target.AlbumName) != "" {
 		printer.Field("album", target.AlbumName)
 	}
+	if position := trackPosition(target); position != "" {
+		printer.Field("position", position)
+	}
 	if details := trackDetails(target); details != "" {
 		printer.Field("details", details)
 	}
@@ -205,11 +264,41 @@ func trackLabel(track tracks.Track) string {
 	return fmt.Sprintf("%s — %s", title, track.ArtistName)
 }
 
+// trackCandidateLabel renders one candidate of an ambiguous query. It carries
+// everything that tells same-named tracks apart — album, disc/track number,
+// format and duration — so the right id can be picked.
 func trackCandidateLabel(track tracks.Track) string {
-	if strings.TrimSpace(track.AlbumName) == "" {
-		return trackLabel(track)
+	label := trackLabel(track)
+	if album := strings.TrimSpace(track.AlbumName); album != "" {
+		label = fmt.Sprintf("%s (%s)", label, album)
 	}
-	return fmt.Sprintf("%s (%s)", trackLabel(track), track.AlbumName)
+
+	parts := []string{label}
+	if position := trackPosition(track); position != "" {
+		parts = append(parts, position)
+	}
+	if format := strings.TrimSpace(track.Format); format != "" {
+		parts = append(parts, format)
+	}
+	if duration := formatDuration(track.DurationSeconds); duration != "" {
+		parts = append(parts, duration)
+	}
+	return strings.Join(parts, " · ")
+}
+
+// trackPosition renders the disc/track numbers, omitting unknowns and the
+// implicit first disc.
+func trackPosition(track tracks.Track) string {
+	switch {
+	case track.DiscNumber > 1 && track.TrackNumber > 0:
+		return fmt.Sprintf("disc %d track %d", track.DiscNumber, track.TrackNumber)
+	case track.TrackNumber > 0:
+		return fmt.Sprintf("track %d", track.TrackNumber)
+	case track.DiscNumber > 1:
+		return fmt.Sprintf("disc %d", track.DiscNumber)
+	default:
+		return ""
+	}
 }
 
 func trackDetails(track tracks.Track) string {

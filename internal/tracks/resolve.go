@@ -47,23 +47,50 @@ const (
 	ambiguityDelta = 0.03
 )
 
-// Resolve finds the single track best matching query, optionally restricted to
-// artist and/or album. It returns ErrNoMatch when nothing is close enough and
+// Criteria narrows a track query. Every field is optional; a zero Track or Disc
+// means "any". Track and Disc are what tells two tracks with the same name on
+// the same album apart.
+type Criteria struct {
+	Artist string
+	Album  string
+	Track  int
+	Disc   int
+}
+
+// positionLabel describes the requested disc/track numbers for error messages.
+func (c Criteria) positionLabel() string {
+	switch {
+	case c.Disc > 0 && c.Track > 0:
+		return fmt.Sprintf("disc %d track %d", c.Disc, c.Track)
+	case c.Track > 0:
+		return fmt.Sprintf("track %d", c.Track)
+	default:
+		return fmt.Sprintf("disc %d", c.Disc)
+	}
+}
+
+// Resolve finds the single track best matching query, optionally restricted by
+// criteria. It returns ErrNoMatch when nothing is close enough and
 // *AmbiguousError when several candidates tie.
-func Resolve(query, artist, album string, candidates []Track) (Track, error) {
+func Resolve(query string, criteria Criteria, candidates []Track) (Track, error) {
 	if len(candidates) == 0 {
 		return Track{}, fmt.Errorf("%w: %q", ErrNoMatch, query)
 	}
 
 	filtered := candidates
-	if strings.TrimSpace(artist) != "" {
-		if filtered = filterByArtist(filtered, artist); len(filtered) == 0 {
-			return Track{}, fmt.Errorf("%w: %q by %q", ErrNoMatch, query, artist)
+	if strings.TrimSpace(criteria.Artist) != "" {
+		if filtered = filterByArtist(filtered, criteria.Artist); len(filtered) == 0 {
+			return Track{}, fmt.Errorf("%w: %q by %q", ErrNoMatch, query, criteria.Artist)
 		}
 	}
-	if strings.TrimSpace(album) != "" {
-		if filtered = filterByAlbum(filtered, album); len(filtered) == 0 {
-			return Track{}, fmt.Errorf("%w: %q on %q", ErrNoMatch, query, album)
+	if strings.TrimSpace(criteria.Album) != "" {
+		if filtered = filterByAlbum(filtered, criteria.Album); len(filtered) == 0 {
+			return Track{}, fmt.Errorf("%w: %q on %q", ErrNoMatch, query, criteria.Album)
+		}
+	}
+	if criteria.Track > 0 || criteria.Disc > 0 {
+		if filtered = filterByPosition(filtered, criteria.Disc, criteria.Track); len(filtered) == 0 {
+			return Track{}, fmt.Errorf("%w: %q at %s", ErrNoMatch, query, criteria.positionLabel())
 		}
 	}
 
@@ -83,7 +110,7 @@ func Resolve(query, artist, album string, candidates []Track) (Track, error) {
 		return Track{}, &AmbiguousError{Query: query, Matches: exact}
 	}
 
-	scored := scoreCandidates(normalizedQuery, artist, album, filtered)
+	scored := scoreCandidates(normalizedQuery, criteria.Artist, criteria.Album, filtered)
 	if len(scored) == 0 {
 		return Track{}, fmt.Errorf("%w: %q", ErrNoMatch, query)
 	}
@@ -144,6 +171,20 @@ func tiedMatches(scored []scoredTrack, best float64) []Track {
 		}
 	}
 	return matches
+}
+
+// filterByPosition narrows candidates to a disc and/or track number. Library
+// rows without a number never match a requested one.
+func filterByPosition(candidates []Track, disc, track int) []Track {
+	return filter(candidates, func(candidate Track) bool {
+		if disc > 0 && candidate.DiscNumber != disc {
+			return false
+		}
+		if track > 0 && candidate.TrackNumber != track {
+			return false
+		}
+		return true
+	})
 }
 
 // filterByArtist narrows candidates to the requested artist, preferring exact

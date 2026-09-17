@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 
 	"github.com/mimmo/needlectl/internal/api"
@@ -24,10 +25,73 @@ func TestTrackLabel(t *testing.T) {
 	}
 }
 
-func TestTrackCandidateLabelIncludesAlbum(t *testing.T) {
-	candidate := tracks.Track{Title: "Intro", ArtistName: "LiSA", AlbumName: "Launcher"}
-	if got, want := trackCandidateLabel(candidate), "Intro — LiSA (Launcher)"; got != want {
-		t.Errorf("trackCandidateLabel = %q, want %q", got, want)
+func TestTrackCandidateLabelShowsWhatTellsDuplicatesApart(t *testing.T) {
+	cases := []struct {
+		name  string
+		track tracks.Track
+		want  string
+	}{
+		{
+			name:  "album only",
+			track: tracks.Track{Title: "Intro", ArtistName: "LiSA", AlbumName: "Launcher"},
+			want:  "Intro — LiSA (Launcher)",
+		},
+		{
+			name: "same title and album, distinguished by disc, track, format and duration",
+			track: tracks.Track{
+				Title: "Intro", ArtistName: "LiSA", AlbumName: "Launcher",
+				DiscNumber: 2, TrackNumber: 3, Format: "FLAC", DurationSeconds: 215,
+			},
+			want: "Intro — LiSA (Launcher) · disc 2 track 3 · FLAC · 3:35",
+		},
+		{
+			name: "single disc omits the disc number",
+			track: tracks.Track{
+				Title: "Intro", ArtistName: "LiSA", AlbumName: "Launcher",
+				DiscNumber: 1, TrackNumber: 3, Format: "MP3",
+			},
+			want: "Intro — LiSA (Launcher) · track 3 · MP3",
+		},
+	}
+	for _, tc := range cases {
+		if got := trackCandidateLabel(tc.track); got != tc.want {
+			t.Errorf("%s: trackCandidateLabel = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
+func TestTrackPosition(t *testing.T) {
+	cases := []struct {
+		track tracks.Track
+		want  string
+	}{
+		{tracks.Track{DiscNumber: 1, TrackNumber: 3}, "track 3"},
+		{tracks.Track{DiscNumber: 2, TrackNumber: 3}, "disc 2 track 3"},
+		{tracks.Track{DiscNumber: 2}, "disc 2"},
+		{tracks.Track{}, ""},
+	}
+	for _, tc := range cases {
+		if got := trackPosition(tc.track); got != tc.want {
+			t.Errorf("trackPosition(%+v) = %q, want %q", tc.track, got, tc.want)
+		}
+	}
+}
+
+func TestAmbiguityHintPointsAtTheUsefulFlag(t *testing.T) {
+	sameAlbum := []tracks.Track{
+		{Title: "Intro", ArtistName: "LiSA", AlbumName: "Launcher"},
+		{Title: "Intro", ArtistName: "LiSA", AlbumName: "Launcher"},
+	}
+	if hint := ambiguityHint(sameAlbum); !strings.Contains(hint, "--track") {
+		t.Errorf("hint for same-album matches = %q, want it to suggest --track", hint)
+	}
+
+	otherAlbums := []tracks.Track{
+		{Title: "Intro", ArtistName: "LiSA", AlbumName: "Launcher"},
+		{Title: "Intro", ArtistName: "LiSA", AlbumName: "Other"},
+	}
+	if hint := ambiguityHint(otherAlbums); !strings.Contains(hint, "--artist/--album") {
+		t.Errorf("hint for different albums = %q, want it to suggest --artist/--album", hint)
 	}
 }
 
@@ -76,5 +140,29 @@ func TestTrackDeleteRequiresAnArgument(t *testing.T) {
 
 	if err := root.Execute(); err == nil {
 		t.Fatal("track delete without an argument returned nil error, want a failure")
+	}
+}
+
+func TestTrackDeleteRejectsFlagsThatWouldBeIgnored(t *testing.T) {
+	cases := [][]string{
+		{"track", "delete", "abc", "--id", "--track", "3"},
+		{"track", "delete", "abc", "--id", "--disc", "2"},
+		{"track", "delete", "abc", "--id", "--artist", "LiSA"},
+		{"track", "delete", "abc", "--id", "--album", "Launcher"},
+	}
+	for _, args := range cases {
+		root := newRootCommand()
+		root.SetArgs(args)
+		root.SetOut(&bytes.Buffer{})
+		root.SetErr(&bytes.Buffer{})
+
+		err := root.Execute()
+		if err == nil {
+			t.Errorf("%v returned nil error, want a failure", args)
+			continue
+		}
+		if !strings.Contains(err.Error(), "cannot be combined") {
+			t.Errorf("%v error = %q, want the conflicting-flags message", args, err)
+		}
 	}
 }
