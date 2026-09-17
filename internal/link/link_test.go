@@ -60,6 +60,7 @@ func TestInputOmitsEmptyLibraryFields(t *testing.T) {
 		"AlbumID":  input.AlbumID,
 		"ArtistID": input.ArtistID,
 		"Format":   input.Format,
+		"CoverURL": input.CoverURL,
 	} {
 		if value != nil {
 			t.Errorf("%s = %q, want nil", name, *value)
@@ -70,6 +71,63 @@ func TestInputOmitsEmptyLibraryFields(t *testing.T) {
 	}
 	if input.TrackNumber != nil || input.DiscNumber != nil {
 		t.Error("track/disc number should be nil when not positive")
+	}
+}
+
+func TestCoverURLBuildsTheReleaseGroupLink(t *testing.T) {
+	library := matcher.Track{ID: "file-1", AlbumID: "cd98137e-68eb-57c4-9c76-7e875d3a0f03", CoverAvailable: true}
+
+	if got, want := CoverURL(library), "/api/v1/covers/release-group/cd98137e-68eb-57c4-9c76-7e875d3a0f03?size=250"; got != want {
+		t.Errorf("CoverURL = %q, want %q", got, want)
+	}
+}
+
+func TestCoverURLIsEmptyWhenThereIsNoCoverToLink(t *testing.T) {
+	cases := map[string]matcher.Track{
+		"album without a cover":  {ID: "file-1", AlbumID: "rg-1", CoverAvailable: false},
+		"track without an album": {ID: "file-1", AlbumID: "", CoverAvailable: true},
+	}
+	for name, library := range cases {
+		if got := CoverURL(library); got != "" {
+			t.Errorf("%s: CoverURL = %q, want empty", name, got)
+		}
+	}
+}
+
+func TestInputCarriesTheCoverURLWhenTheAlbumHasOne(t *testing.T) {
+	input := Input("Disorder", "神崎エルザ", "Elza", matcher.Track{
+		ID: "file-1", AlbumID: "rg-1", CoverAvailable: true,
+	})
+
+	assertStringPointer(t, "CoverURL", input.CoverURL, "/api/v1/covers/release-group/rg-1?size=250")
+}
+
+func TestIndexCarriesCoverAvailability(t *testing.T) {
+	index := Index([]api.LibraryTrack{
+		{ID: "file-1", Title: "Disorder", ArtistName: "神崎エルザ", AlbumTitle: "Elza", AlbumID: "rg-1", CoverAvailable: true},
+		{ID: "file-2", Title: "Rising Hope", ArtistName: "LiSA", AlbumTitle: "Launcher", AlbumID: "rg-2"},
+	})
+
+	withCover, ok := index.Match("Disorder", "神崎エルザ", "Elza")
+	if !ok {
+		t.Fatal("Disorder did not match")
+	}
+	withoutCover, ok := index.Match("Rising Hope", "LiSA", "Launcher")
+	if !ok {
+		t.Fatal("Rising Hope did not match")
+	}
+
+	if !withCover.CoverAvailable {
+		t.Error("CoverAvailable was lost for file-1")
+	}
+	if withoutCover.CoverAvailable {
+		t.Error("CoverAvailable was invented for file-2")
+	}
+	if got := CoverURL(withCover); got == "" {
+		t.Error("file-1 should produce a cover URL")
+	}
+	if got := CoverURL(withoutCover); got != "" {
+		t.Errorf("file-2 should not produce a cover URL, got %q", got)
 	}
 }
 

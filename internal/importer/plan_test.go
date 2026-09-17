@@ -38,6 +38,7 @@ func TestBuildPlanLinksRowsFoundInLibrary(t *testing.T) {
 	index := testIndex(matcher.Track{
 		ID: "file-1", Title: "Disorder", ArtistName: "神崎エルザ", AlbumTitle: "Elza",
 		AlbumID: "rg-1", ArtistID: "ar-1", TrackNumber: 4, DiscNumber: 1, DurationSeconds: 215, Format: "FLAC",
+		CoverAvailable: true,
 	})
 
 	plan := BuildPlan(rows, nil, index)
@@ -61,6 +62,9 @@ func TestBuildPlanLinksRowsFoundInLibrary(t *testing.T) {
 	}
 	if linked.Track.AlbumID == nil || *linked.Track.AlbumID != "rg-1" {
 		t.Errorf("AlbumID = %v, want rg-1", linked.Track.AlbumID)
+	}
+	if linked.Track.CoverURL == nil || *linked.Track.CoverURL != "/api/v1/covers/release-group/rg-1?size=250" {
+		t.Errorf("CoverURL = %v, want the album artwork link", linked.Track.CoverURL)
 	}
 
 	unlinked := plan.Adds[1]

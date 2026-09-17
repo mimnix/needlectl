@@ -339,6 +339,14 @@ title+artist, then a fuzzy pass), but the link itself is always written with the
 `--verbose` output shows the resolved file id — a fuzzy title match is visible
 there instead of being silent.
 
+Linked entries also carry the album's **cover art**. DroppedNeedle stores the
+artwork reference on the playlist row itself and never derives one from the
+library file, so an entry created without it shows no cover — and the playlist's
+own cover is assembled from those same per-track references. `needlectl` sets
+`cover_url` to `/api/v1/covers/release-group/<album id>?size=250` whenever the
+matched library track reports `cover_available`, so imported and relinked tracks
+get artwork. Albums with no artwork in DroppedNeedle stay without one.
+
 Flags:
 
 | Flag | Default | Description |
@@ -503,6 +511,14 @@ Authentication uses `Authorization: Bearer <token>`. An entry is considered
 > it only stores `source_type`/`available_sources` and resolves the file from the
 > album metadata already on the entry. Linking an existing entry therefore means
 > replacing it (add at the same position, then remove the old one).
+>
+> `cover_url` on a playlist entry is **client-supplied and stored verbatim**:
+> neither `POST /playlists/{id}/tracks` nor `resolve-sources` derives artwork from
+> the linked library file. The playlist cover list is built from those same
+> per-track values (`SELECT DISTINCT cover_url … LIMIT 4`), so entries added
+> without a cover contribute neither per-track art nor a playlist image.
+> `/api/v1/covers/release-group/{id}` takes the album's MusicBrainz release-group
+> id, which is the `album_id` of a library track.
 >
 > `POST /playlists/{id}/resolve-sources` only resolves entries that have both an
 > `album_id` (MusicBrainz release-group id) and a `track_number`; entries without

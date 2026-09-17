@@ -25,6 +25,10 @@ type LibraryTrack struct {
 	TrackNumber     int     `json:"track_number"`
 	DurationSeconds float64 `json:"duration_seconds"`
 	Format          string  `json:"format"`
+	// CoverAvailable reports whether DroppedNeedle holds artwork for the album.
+	// It is the server's own signal and is not always exact (a rare false
+	// negative), but it keeps the generated cover links from 404ing.
+	CoverAvailable bool `json:"cover_available"`
 }
 
 type libraryTracksResponse struct {
@@ -85,6 +89,7 @@ type PlaylistTrack struct {
 	ArtistID         *string  `json:"artist_id"`
 	TrackSourceID    *string  `json:"track_source_id"`
 	LibraryFileID    *string  `json:"library_file_id"`
+	CoverURL         *string  `json:"cover_url"`
 	SourceType       string   `json:"source_type"`
 	AvailableSources []string `json:"available_sources"`
 	TrackNumber      *int     `json:"track_number"`
@@ -121,6 +126,7 @@ type TrackInput struct {
 	AlbumID          *string  `json:"album_id,omitempty"`
 	ArtistID         *string  `json:"artist_id,omitempty"`
 	TrackSourceID    *string  `json:"track_source_id,omitempty"`
+	CoverURL         *string  `json:"cover_url,omitempty"`
 	SourceType       string   `json:"source_type"`
 	AvailableSources []string `json:"available_sources,omitempty"`
 	Format           *string  `json:"format,omitempty"`

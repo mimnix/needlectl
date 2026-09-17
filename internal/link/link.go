@@ -5,6 +5,7 @@ package link
 import (
 	"context"
 	"fmt"
+	"net/url"
 
 	"github.com/mimmo/needlectl/internal/api"
 	"github.com/mimmo/needlectl/internal/matcher"
@@ -12,6 +13,9 @@ import (
 
 // SourceTypeLocal is the source_type the API expects for a native library file.
 const SourceTypeLocal = "local"
+
+// coverSize is the artwork rendition DroppedNeedle stores on playlist entries.
+const coverSize = "250"
 
 // Index builds a matcher index over the native library.
 func Index(tracks []api.LibraryTrack) *matcher.Index {
@@ -28,9 +32,24 @@ func Index(tracks []api.LibraryTrack) *matcher.Index {
 			TrackNumber:     track.TrackNumber,
 			DurationSeconds: track.DurationSeconds,
 			Format:          track.Format,
+			CoverAvailable:  track.CoverAvailable,
 		}
 	}
 	return matcher.NewIndex(converted)
+}
+
+// CoverURL returns the DroppedNeedle artwork URL for the album of a library
+// track, or "" when no cover is known to exist.
+//
+// Playlist entries store the artwork reference themselves and the server never
+// derives one from the library file, so an entry added without this URL shows no
+// cover. The album id of a library track is its MusicBrainz release-group id,
+// which is exactly what the covers endpoint expects.
+func CoverURL(library matcher.Track) string {
+	if library.AlbumID == "" || !library.CoverAvailable {
+		return ""
+	}
+	return "/api/v1/covers/release-group/" + url.PathEscape(library.AlbumID) + "?size=" + coverSize
 }
 
 // Input builds the add-tracks payload that links a playlist entry to library.
@@ -44,6 +63,7 @@ func Input(title, artist, album string, library matcher.Track) api.TrackInput {
 		AlbumID:          stringPointer(library.AlbumID),
 		ArtistID:         stringPointer(library.ArtistID),
 		TrackSourceID:    stringPointer(library.ID),
+		CoverURL:         stringPointer(CoverURL(library)),
 		SourceType:       SourceTypeLocal,
 		AvailableSources: []string{SourceTypeLocal},
 		Format:           stringPointer(library.Format),

@@ -38,6 +38,7 @@ func TestBuildPlanSelectsOnlyUnplayableEntriesFoundInTheLibrary(t *testing.T) {
 	index := testIndex(matcher.Track{
 		ID: "file-1", Title: "Disorder", ArtistName: "神崎エルザ", AlbumTitle: "Elza",
 		AlbumID: "rg-1", ArtistID: "ar-1", TrackNumber: 4, DurationSeconds: 215, Format: "FLAC",
+		CoverAvailable: true,
 	})
 
 	plan := BuildPlan(tracks, index)
@@ -67,6 +68,9 @@ func TestBuildPlanSelectsOnlyUnplayableEntriesFoundInTheLibrary(t *testing.T) {
 	}
 	if item.Track.SourceType != link.SourceTypeLocal {
 		t.Errorf("SourceType = %q, want %q", item.Track.SourceType, link.SourceTypeLocal)
+	}
+	if item.Track.CoverURL == nil || *item.Track.CoverURL != "/api/v1/covers/release-group/rg-1?size=250" {
+		t.Errorf("CoverURL = %v, want the album artwork link", item.Track.CoverURL)
 	}
 }
 

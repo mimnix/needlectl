@@ -1,6 +1,9 @@
 package matcher
 
-// Track is a library track in the shape the matcher needs.
+// Track is a library track in the shape the matcher needs. Fields such as
+// AlbumID, Format and CoverAvailable do not take part in the similarity
+// comparison; they are carried through so callers can build a link payload from
+// the matched track.
 type Track struct {
 	ID              string
 	Title           string
@@ -12,6 +15,7 @@ type Track struct {
 	TrackNumber     int
 	DurationSeconds float64
 	Format          string
+	CoverAvailable  bool
 }
 
 // Matching thresholds. Title similarity is required separately so that a very
