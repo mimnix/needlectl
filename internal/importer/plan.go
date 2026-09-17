@@ -2,14 +2,12 @@ package importer
 
 import (
 	"github.com/mimmo/needlectl/internal/api"
+	"github.com/mimmo/needlectl/internal/link"
 	"github.com/mimmo/needlectl/internal/matcher"
 	"github.com/mimmo/needlectl/internal/playlist"
 )
 
-const (
-	sourceTypeLocal = "local"
-	keySeparator    = "\x1f"
-)
+const keySeparator = "\x1f"
 
 // Add describes a track that does not exist in the playlist yet.
 type Add struct {
@@ -88,28 +86,17 @@ func BuildPlan(rows []playlist.Row, existing []api.PlaylistTrack, index *matcher
 // buildTrackInput converts a CSV row (optionally enriched with a library match)
 // into the API request shape.
 func buildTrackInput(row playlist.Row, library matcher.Track, linked bool) api.TrackInput {
+	if linked {
+		return link.Input(row.TrackName, row.ArtistName, row.AlbumName, library)
+	}
+
 	input := api.TrackInput{
 		TrackName:  row.TrackName,
 		ArtistName: row.ArtistName,
 		AlbumName:  row.AlbumName,
 	}
-	if !linked {
-		if row.DurationMs != nil {
-			input.Duration = intPointer(*row.DurationMs / 1000)
-		}
-		return input
-	}
-
-	input.AlbumID = stringPointer(library.AlbumID)
-	input.ArtistID = stringPointer(library.ArtistID)
-	input.TrackSourceID = stringPointer(library.ID)
-	input.SourceType = sourceTypeLocal
-	input.AvailableSources = []string{sourceTypeLocal}
-	input.Format = stringPointer(library.Format)
-	input.TrackNumber = positivePointer(library.TrackNumber)
-	input.DiscNumber = positivePointer(library.DiscNumber)
-	if library.DurationSeconds > 0 {
-		input.Duration = intPointer(int(library.DurationSeconds + 0.5))
+	if row.DurationMs != nil {
+		input.Duration = intPointer(*row.DurationMs / 1000)
 	}
 	return input
 }
@@ -120,18 +107,4 @@ func entryKey(track, artist, album string) string {
 		matcher.Normalize(album)
 }
 
-func stringPointer(value string) *string {
-	if value == "" {
-		return nil
-	}
-	return &value
-}
-
 func intPointer(value int) *int { return &value }
-
-func positivePointer(value int) *int {
-	if value <= 0 {
-		return nil
-	}
-	return &value
-}

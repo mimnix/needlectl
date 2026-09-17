@@ -178,10 +178,10 @@ func confirmDeletion(cmd *cobra.Command, printer *output.Printer, target albums.
 	printer.Raw("")
 	if deleteFiles {
 		printer.Warn("this permanently deletes the album, its %s and the files on disk",
-			countLabel(target.TrackCount, "track"))
+			output.CountLabel(target.TrackCount, "track"))
 	} else {
 		printer.Warn("this removes the album and its %s from the catalog (the files are kept)",
-			countLabel(target.TrackCount, "track"))
+			output.CountLabel(target.TrackCount, "track"))
 	}
 
 	fmt.Fprintf(cmd.OutOrStdout(), "Delete %s? [y/N]: ", albumLabel(target))

@@ -25,7 +25,7 @@ func TestDefaultPlaylistNameStripsExtension(t *testing.T) {
 func TestRootCommandRegistersSubcommands(t *testing.T) {
 	root := newRootCommand()
 
-	wanted := map[string]bool{"login": false, "import": false, "album": false, "track": false}
+	wanted := map[string]bool{"login": false, "import": false, "album": false, "track": false, "playlist": false}
 	for _, command := range root.Commands() {
 		if _, ok := wanted[command.Name()]; ok {
 			wanted[command.Name()] = true

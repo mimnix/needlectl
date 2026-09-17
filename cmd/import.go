@@ -75,7 +75,7 @@ func runImport(cmd *cobra.Command, opts *globalOptions, input importOptions) err
 	if len(rows) == 0 {
 		return fmt.Errorf("no importable tracks found in %s", input.path)
 	}
-	printer.Info("%s, %d warning(s)", countLabel(len(rows), "track"), len(warnings))
+	printer.Info("%s, %d warning(s)", output.CountLabel(len(rows), "track"), len(warnings))
 
 	name := strings.TrimSpace(input.name)
 	if name == "" {
@@ -121,7 +121,7 @@ func printSummary(printer *output.Printer, result importer.Result, dryRun bool) 
 	if result.PlaylistID != "" {
 		printer.Field("id", result.PlaylistID)
 	}
-	printer.Field("library", countLabel(result.LibrarySize, "track"))
+	printer.Field("library", output.CountLabel(result.LibrarySize, "track"))
 	printer.Field("added", fmt.Sprintf("%d (%d linked)", result.AddedLinked+result.AddedUnlinked, result.AddedLinked))
 	printer.Field("refreshed", strconv.Itoa(result.Refreshed))
 	printer.Field("unchanged", strconv.Itoa(result.Unchanged))
@@ -134,11 +134,4 @@ func printSummary(printer *output.Printer, result importer.Result, dryRun bool) 
 func defaultPlaylistName(path string) string {
 	base := filepath.Base(path)
 	return strings.TrimSuffix(base, filepath.Ext(base))
-}
-
-func countLabel(n int, singular string) string {
-	if n == 1 {
-		return fmt.Sprintf("1 %s", singular)
-	}
-	return fmt.Sprintf("%d %ss", n, singular)
 }

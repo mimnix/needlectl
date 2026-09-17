@@ -25,6 +25,15 @@ func TestPrinterWritesStepsAndSuccess(t *testing.T) {
 	}
 }
 
+func TestCountLabelUsesSingularAndPlural(t *testing.T) {
+	cases := map[int]string{0: "0 tracks", 1: "1 track", 2: "2 tracks"}
+	for count, want := range cases {
+		if got := CountLabel(count, "track"); got != want {
+			t.Errorf("CountLabel(%d, track) = %q, want %q", count, got, want)
+		}
+	}
+}
+
 func TestErrorsGoToStderr(t *testing.T) {
 	var out, errOut bytes.Buffer
 	printer := New(&out, &errOut, Options{})

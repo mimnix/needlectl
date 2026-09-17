@@ -59,6 +59,7 @@ The connection settings (server URL, username and password) are stored in
 	root.AddCommand(newImportCommand(opts))
 	root.AddCommand(newAlbumCommand(opts))
 	root.AddCommand(newTrackCommand(opts))
+	root.AddCommand(newPlaylistCommand(opts))
 
 	return root
 }

@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/mimmo/needlectl/internal/api"
+	"github.com/mimmo/needlectl/internal/link"
 	"github.com/mimmo/needlectl/internal/matcher"
 	"github.com/mimmo/needlectl/internal/playlist"
 )
@@ -16,13 +17,15 @@ func testIndex(tracks ...matcher.Track) *matcher.Index {
 	return matcher.NewIndex(tracks)
 }
 
+func stringPointer(value string) *string { return &value }
+
 func linkedEntry(track, artist, album, fileID string) api.PlaylistTrack {
 	return api.PlaylistTrack{
 		ID:            "entry-" + fileID,
 		TrackName:     track,
 		ArtistName:    artist,
 		AlbumName:     album,
-		SourceType:    sourceTypeLocal,
+		SourceType:    link.SourceTypeLocal,
 		LibraryFileID: stringPointer(fileID),
 	}
 }
@@ -50,8 +53,8 @@ func TestBuildPlanLinksRowsFoundInLibrary(t *testing.T) {
 	if !linked.Linked {
 		t.Error("first add should be linked")
 	}
-	if linked.Track.SourceType != sourceTypeLocal {
-		t.Errorf("SourceType = %q, want %q", linked.Track.SourceType, sourceTypeLocal)
+	if linked.Track.SourceType != link.SourceTypeLocal {
+		t.Errorf("SourceType = %q, want %q", linked.Track.SourceType, link.SourceTypeLocal)
 	}
 	if linked.Track.TrackSourceID == nil || *linked.Track.TrackSourceID != "file-1" {
 		t.Errorf("TrackSourceID = %v, want file-1", linked.Track.TrackSourceID)

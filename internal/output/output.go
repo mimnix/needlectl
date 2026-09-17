@@ -112,6 +112,14 @@ func (p *Printer) Raw(format string, args ...any) {
 	fmt.Fprintf(p.out, format+"\n", args...)
 }
 
+// CountLabel renders a count followed by a singular or plural noun.
+func CountLabel(n int, singular string) string {
+	if n == 1 {
+		return fmt.Sprintf("1 %s", singular)
+	}
+	return fmt.Sprintf("%d %ss", n, singular)
+}
+
 func (p *Printer) paint(code, text string) string {
 	if !p.color {
 		return text

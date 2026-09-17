@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/mimmo/needlectl/internal/api"
+	"github.com/mimmo/needlectl/internal/link"
 	"github.com/mimmo/needlectl/internal/matcher"
 	"github.com/mimmo/needlectl/internal/output"
 	"github.com/mimmo/needlectl/internal/playlist"
@@ -98,9 +99,9 @@ func (r *Runner) loadLibrary(ctx context.Context, result *Result) (*matcher.Inde
 	if err != nil {
 		return nil, fmt.Errorf("load library: %w", err)
 	}
-	index := matcher.NewIndex(toMatcherTracks(tracks))
+	index := link.Index(tracks)
 	result.LibrarySize = index.Len()
-	r.info("%s indexed", countLabel(index.Len(), "track"))
+	r.info("%s indexed", output.CountLabel(index.Len(), "track"))
 	return index, nil
 }
 
@@ -130,7 +131,7 @@ func (r *Runner) ensurePlaylist(ctx context.Context, name string, result *Result
 	if err != nil {
 		return "", nil, fmt.Errorf("load playlist %q: %w", name, err)
 	}
-	r.debug("found playlist %s (%s)", detail.ID, countLabel(len(detail.Tracks), "track"))
+	r.debug("found playlist %s (%s)", detail.ID, output.CountLabel(len(detail.Tracks), "track"))
 	return detail.ID, detail.Tracks, nil
 }
 
@@ -170,7 +171,7 @@ func (r *Runner) applyAdds(ctx context.Context, playlistID string, plan Plan, re
 	result.AddedUnlinked = len(inputs) - linked
 
 	r.step("Adding %s (%d linked, %d unlinked)",
-		countLabel(len(inputs), "track"), linked, result.AddedUnlinked)
+		output.CountLabel(len(inputs), "track"), linked, result.AddedUnlinked)
 
 	batchSize := r.batchSize()
 	for start := 0; start < len(inputs); start += batchSize {
@@ -183,7 +184,7 @@ func (r *Runner) applyAdds(ctx context.Context, playlistID string, plan Plan, re
 		}
 		r.debug("added tracks %d-%d", start+1, end)
 	}
-	r.success("Added %s", countLabel(len(inputs), "track"))
+	r.success("Added %s", output.CountLabel(len(inputs), "track"))
 	return nil
 }
 
@@ -197,25 +198,18 @@ func (r *Runner) applyRefreshes(ctx context.Context, playlistID string, plan Pla
 		return refreshes[i].Existing.Position < refreshes[j].Existing.Position
 	})
 
-	r.step("Refreshing %s now present in the library", countLabel(len(refreshes), "track"))
+	r.step("Refreshing %s now present in the library", output.CountLabel(len(refreshes), "track"))
 	for _, refresh := range refreshes {
 		// An unlinked entry cannot be patched into a linked one (the API
 		// resolves a source from stored album/track metadata), so the entry is
-		// replaced in place. The linked replacement is inserted first and the
-		// old entry removed afterwards: if the insert fails the original entry
-		// is still there, and if the remove fails we are left with a harmless
-		// duplicate rather than a hole.
-		position := refresh.Existing.Position
-		if _, err := r.API.AddTracks(ctx, playlistID, []api.TrackInput{refresh.Track}, &position); err != nil {
-			return fmt.Errorf("refresh %q: add linked entry: %w", refresh.Row.TrackName, err)
-		}
-		if err := r.API.RemoveTracks(ctx, playlistID, []string{refresh.Existing.ID}); err != nil {
-			return fmt.Errorf("refresh %q: remove old entry (a duplicate may remain): %w", refresh.Row.TrackName, err)
+		// replaced in place. See link.Replace for the failure guarantees.
+		if err := link.Replace(ctx, r.API, playlistID, refresh.Existing, refresh.Track); err != nil {
+			return fmt.Errorf("refresh %q: %w", refresh.Row.TrackName, err)
 		}
 		result.Refreshed++
 		r.debug("relinked %q — %s", refresh.Row.TrackName, refresh.Row.ArtistName)
 	}
-	r.success("Relinked %s", countLabel(result.Refreshed, "track"))
+	r.success("Relinked %s", output.CountLabel(result.Refreshed, "track"))
 	return nil
 }
 
@@ -281,25 +275,6 @@ func (r *Runner) debug(format string, args ...any) {
 	}
 }
 
-func toMatcherTracks(tracks []api.LibraryTrack) []matcher.Track {
-	result := make([]matcher.Track, len(tracks))
-	for i, track := range tracks {
-		result[i] = matcher.Track{
-			ID:              track.ID,
-			Title:           track.Title,
-			AlbumID:         track.AlbumID,
-			AlbumTitle:      track.AlbumTitle,
-			ArtistID:        track.ArtistID,
-			ArtistName:      track.ArtistName,
-			DiscNumber:      track.DiscNumber,
-			TrackNumber:     track.TrackNumber,
-			DurationSeconds: track.DurationSeconds,
-			Format:          track.Format,
-		}
-	}
-	return result
-}
-
 func findPlaylistID(summaries []api.PlaylistSummary, name string) string {
 	target := strings.TrimSpace(name)
 	for _, summary := range summaries {
@@ -312,13 +287,6 @@ func findPlaylistID(summaries []api.PlaylistSummary, name string) string {
 		}
 	}
 	return ""
-}
-
-func countLabel(n int, singular string) string {
-	if n == 1 {
-		return fmt.Sprintf("1 %s", singular)
-	}
-	return fmt.Sprintf("%d %ss", n, singular)
 }
 
 func linkedCount(adds []Add) int {

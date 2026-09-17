@@ -1,9 +1,10 @@
 # needlectl
 
 `needlectl` is a command-line client for a self-hosted [DroppedNeedle](https://www.droppedneedle.com/)
-instance. It talks to DroppedNeedle over its REST API (`/api/v1`) and currently
-supports importing CSV playlists (such as a Spotify library export) into
-DroppedNeedle playlists.
+instance. It talks to DroppedNeedle over its REST API (`/api/v1`) and manages the
+native library and playlists: importing CSV playlists (such as a Spotify library
+export), relinking a playlist's unplayable tracks to library files, and deleting
+albums or single tracks.
 
 The import is **idempotent** and **library-aware**: tracks that already exist in
 your DroppedNeedle library are linked to their library file, and entries that
@@ -27,6 +28,9 @@ were imported before the track was available are relinked once it appears.
 - **Track deletion** — `needlectl track delete` resolves a single track by name
   (refusing ambiguous matches) and removes it. Note that the DroppedNeedle API
   always deletes the track's file from disk for this operation.
+- **Playlist relinking** — `needlectl playlist relink` scans an existing playlist
+  and links the entries that have no source yet to matching library files. Entries
+  that already play are left untouched, so a working link is never replaced.
 - **`login` command** that stores credentials in `~/.needlectl.conf` (written
   `0600`).
 - **Clean, informative output** with coloured progress and a summary; `--dry-run`
@@ -244,6 +248,88 @@ Flags:
 > want to drop catalog entries, use `album delete --keep-files` (album scope)
 > instead.
 
+### `needlectl playlist relink <playlist>`
+
+Scans the tracks of an existing playlist and links the ones that cannot be played
+yet to files of the native DroppedNeedle library. This is useful when a playlist
+was imported before its tracks were available, or when a library scan brought in
+files that were missing earlier.
+
+Only entries with **no source at all** (`library_file_id`, `track_source_id` and
+`source_type` all empty) are considered. Entries that already play — through the
+local library, Navidrome, Plex or Jellyfin — are counted but never modified.
+
+```
+$ needlectl playlist relink Anime
+› Authenticating with https://music.example.com
+✓ Signed in as Admin (admin)
+› Loading DroppedNeedle library
+  1024 tracks indexed
+› Resolving playlist "Anime"
+› Planning relink
+  120 entries · 65 already playable · 40 to relink · 15 unmatched
+  ~ Disorder — 神崎エルザ
+  ~ Rising Hope — LiSA
+  ~ Gurenge — LiSA
+  … and 37 more (use --verbose to list them all)
+› Linking 40 tracks to the library
+✓ Relinked 40 tracks
+› Resolving track sources
+
+✓ Relink complete
+  playlist:    Anime
+  id:          pl_01H…
+  library:     1024 tracks
+  tracks:      120
+  playable:    65
+  relinked:    40
+  unmatched:   15
+  playable now: 105
+  unlinked:    15
+```
+
+The plan lists every entry that is about to be relinked, so you can review it
+before anything changes (`--dry-run` stops right after this point). The list is
+capped at 20 lines; `--verbose` lists them all and appends the library file each
+entry matched:
+
+```
+› Planning relink
+  120 entries · 65 already playable · 40 to relink · 15 unmatched
+  ~ Disorder — 神崎エルザ → 5a1e… · Elza · FLAC
+  ~ Rising Hope — LiSA → 9c4b… · Launcher · MP3
+  …
+```
+
+**How an entry is matched and linked:** candidates are chosen by
+**title/artist/album** (Unicode-normalized: exact title+artist+album, then exact
+title+artist, then a fuzzy pass), but the link itself is always written with the
+**library file id** of the match (`track_source_id` = that file id, with
+`source_type: local`). Titles are never used to write the link, which is why the
+`--verbose` output shows the resolved file id — a fuzzy title match is visible
+there instead of being silent.
+
+Flags:
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--id` | `false` | Treat the argument as an exact playlist id instead of a name. |
+| `--resolve` | `true` | Also ask the server to resolve sources after relinking. |
+| `--dry-run` | `false` | Show what would be relinked without modifying the playlist. |
+
+> **Why entries are replaced, not patched:** the API's track update endpoint only
+> accepts `source_type` and `available_sources` and resolves a file from the
+> album metadata already stored on the entry. Spotify-imported entries usually
+> have no MusicBrainz album id, so they cannot be patched. `needlectl` therefore
+> inserts the linked entry at the same position and removes the old entry right
+> after (insert first, so a failure can never leave a hole), which preserves the
+> playlist order.
+
+> `--resolve` complements the local matching: `resolve-sources` groups entries by
+> MusicBrainz album id and links them to local/Navidrome/Plex/Jellyfin sources,
+> catching tracks whose title our matcher cannot align. It cannot help entries
+> that have no album id.
+
 ## CSV format
 
 The parser accepts the Spotify "library" export format and similar files. The
@@ -365,7 +451,8 @@ Endpoints used, all under `/api/v1`:
 | `GET /playlists/{id}` | Playlist with tracks |
 | `POST /playlists/{id}/tracks` | `{tracks, position?}` → add entries |
 | `POST /playlists/{id}/tracks/remove` | `{track_ids}` → remove entries |
-| `POST /playlists/{id}/resolve-sources` | Link/heal track sources |
+| `POST /playlists/{id}/resolve-sources` | Link/heal track sources (used by `playlist relink --resolve`) |
+| `PATCH /playlists/{id}/tracks/{id}` | Update `source_type`/`available_sources` only (cannot set a library file) |
 | `GET /library/albums?q=&page=&page_size=` | Search the library albums |
 | `GET /library/albums/{id}` | Album detail (used by `album delete --id`) |
 | `DELETE /library/album/{id}?delete_files=&stop_wanted=` | Remove an album and cascade its tracks |
@@ -381,6 +468,15 @@ Authentication uses `Authorization: Bearer <token>`. An entry is considered
 >
 > `DELETE /library/tracks/{id}` requires the curator role (admin satisfies it)
 > and accepts no options: the track's file is always deleted from disk.
+>
+> `PATCH /playlists/{id}/tracks/{id}` cannot attach a library file to an entry:
+> it only stores `source_type`/`available_sources` and resolves the file from the
+> album metadata already on the entry. Linking an existing entry therefore means
+> replacing it (add at the same position, then remove the old one).
+>
+> `POST /playlists/{id}/resolve-sources` only resolves entries that have both an
+> `album_id` (MusicBrainz release-group id) and a `track_number`; entries without
+> them keep their stored sources.
 
 ## Development
 
@@ -409,20 +505,24 @@ cmd/
   import.go                  import command and summary
   album.go                   album delete command and confirmation
   track.go                   track delete command and confirmation
+  playlist.go                playlist relink command and summary
 internal/
   config/                    ~/.needlectl.conf load/save/validation
   api/                       typed DroppedNeedle REST client
   playlist/                  CSV parser
   matcher/                   normalization + library matching
+  link/                      shared library-linking primitives
   albums/                    album query resolution (unique-match only)
   tracks/                    track query resolution (unique-match only)
+  relink/                    playlist relink plan + orchestration
   importer/                  pure import plan + orchestration
   output/                    coloured, structured terminal output
 ```
 
-The import decision logic (`internal/importer/plan.go`) is a pure function and
-is the main unit-test target; the API client is tested with `httptest` and the
-runner with an in-memory fake API.
+The decision logic is pure and is the main unit-test target:
+`internal/importer/plan.go` (what an import changes) and
+`internal/relink/plan.go` (which playlist entries can be linked). The API client
+is tested with `httptest` and each runner with an in-memory fake API.
 
 ## Troubleshooting
 
@@ -439,7 +539,10 @@ runner with an in-memory fake API.
 | `refusing to guess: narrow the search with --artist/--album or pass --id` | More than one track matched. Re-run with `--artist`/`--album`, or copy the id from the listed candidates and use `--id`. |
 | `refusing to delete without confirmation; re-run with --yes` | The album delete ran without a terminal. Pass `--yes` to confirm non-interactively. |
 | `too many albums match …` | The album query was too broad to page through. Refine the query or use `--id`. |
-| A duplicate entry appears after an interrupted run | The refresh inserts before removing; re-run the import to reconcile. |
+| `playlist "…" not found` | Check the name (`needlectl playlist relink` matches case-insensitively), or pass the id with `--id`. |
+| `refusing to guess: pass the playlist id with --id` | Several playlists share that name. Copy the id from the listed candidates and use `--id`. |
+| `playlist relink` reports entries as `unmatched` | Those tracks are not in the DroppedNeedle library yet. Scan the library, then re-run `playlist relink`. |
+| A duplicate entry appears after an interrupted run | The refresh/relink inserts before removing; re-run the command to reconcile. |
 
 ## Privacy
 
@@ -449,19 +552,24 @@ exports and `~/.needlectl.conf` private.
 
 ## Known limitations
 
-- Playlists are matched by name; if several playlists share a name the first
-  match is used (a `--playlist-id` flag could disambiguate in the future).
+- Playlists are matched by name. `import` uses the first case-insensitive match;
+  `playlist relink` prefers correctness and refuses an ambiguous name, listing the
+  candidates so you can pass `--id`.
 - `album delete` requires an admin account and is irreversible: by default it
   deletes the files from disk. It refuses to act when an album name is
   ambiguous, so it never deletes the wrong album.
 - `track delete` requires the curator role and always deletes the file from
   disk: the API exposes no catalog-only variant for a single track. It refuses
   to act when a track name is ambiguous.
+- `playlist relink` only touches entries that have no source at all. Entries that
+  play through another source (Navidrome, Plex, Jellyfin) already have a link, so
+  they are never re-pointed at the local library.
 - Duration is stored but not used as a matching guard, so live/remix versions
   with very similar titles could be linked to the wrong file.
 - The password is stored in plain text in a `0600` file; an OS keyring backend
   would remove that class of risk.
-- Only the `import` and `login` commands exist so far.
+- The commands implemented so far are `login`, `import`, `album delete`,
+  `track delete` and `playlist relink`.
 
 ## License
 
