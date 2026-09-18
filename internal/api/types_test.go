@@ -57,3 +57,31 @@ func TestLibraryTrackReadsCoverAvailable(t *testing.T) {
 		t.Error("CoverAvailable = false, want true")
 	}
 }
+
+func TestLibraryAlbumReadsIdentityFields(t *testing.T) {
+	raw := `{"id":"a1","album_identity_state":"local_only",
+	         "identification_status":"needs_review","review_id":"r-1",
+	         "management_identity_readiness":"exact_release_required"}`
+
+	var album LibraryAlbum
+	if err := json.Unmarshal([]byte(raw), &album); err != nil {
+		t.Fatalf("unmarshal failed: %v", err)
+	}
+	if album.AlbumIdentityState != "local_only" || album.IdentificationStatus != "needs_review" {
+		t.Errorf("album = %+v", album)
+	}
+	if album.ReviewID == nil || *album.ReviewID != "r-1" {
+		t.Errorf("ReviewID = %v", album.ReviewID)
+	}
+	if album.ManagementIdentityReadiness != "exact_release_required" {
+		t.Errorf("ManagementIdentityReadiness = %q", album.ManagementIdentityReadiness)
+	}
+
+	var withoutReview LibraryAlbum
+	if err := json.Unmarshal([]byte(`{"id":"a2","review_id":null}`), &withoutReview); err != nil {
+		t.Fatalf("unmarshal failed: %v", err)
+	}
+	if withoutReview.ReviewID != nil {
+		t.Errorf("ReviewID = %v, want nil", *withoutReview.ReviewID)
+	}
+}

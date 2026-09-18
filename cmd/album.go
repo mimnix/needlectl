@@ -21,6 +21,7 @@ func newAlbumCommand(opts *globalOptions) *cobra.Command {
 		Short: "Inspect and manage albums in the DroppedNeedle library",
 	}
 	album.AddCommand(newAlbumDeleteCommand(opts))
+	album.AddCommand(newAlbumRenameCommand(opts))
 	return album
 }
 
@@ -88,7 +89,7 @@ func runAlbumDelete(cmd *cobra.Command, opts *globalOptions, input albumDeleteOp
 	}
 	printer.Success("Signed in as %s (%s)", user.DisplayName, user.Role)
 
-	target, err := resolveAlbumTarget(cmd, printer, client, input)
+	target, err := resolveAlbumTarget(cmd, printer, client, input.argument, input.byID, input.artist)
 	if err != nil {
 		return err
 	}
@@ -138,27 +139,27 @@ func runAlbumDelete(cmd *cobra.Command, opts *globalOptions, input albumDeleteOp
 	return nil
 }
 
-func resolveAlbumTarget(cmd *cobra.Command, printer *output.Printer, client *api.Client, input albumDeleteOptions) (albums.Album, error) {
-	if input.byID {
-		printer.Step("Loading album %s", input.argument)
-		detail, err := client.GetLibraryAlbum(cmd.Context(), input.argument)
+func resolveAlbumTarget(cmd *cobra.Command, printer *output.Printer, client *api.Client, argument string, byID bool, artist string) (albums.Album, error) {
+	if byID {
+		printer.Step("Loading album %s", argument)
+		detail, err := client.GetLibraryAlbum(cmd.Context(), argument)
 		if err != nil {
-			return albums.Album{}, fmt.Errorf("load album %q: %w", input.argument, err)
+			return albums.Album{}, fmt.Errorf("load album %q: %w", argument, err)
 		}
 		return toAlbum(*detail), nil
 	}
 
-	printer.Step("Looking up album %q in the library", input.argument)
-	found, err := client.ListLibraryAlbums(cmd.Context(), input.argument)
+	printer.Step("Looking up album %q in the library", argument)
+	found, err := client.ListLibraryAlbums(cmd.Context(), argument)
 	if err != nil {
 		return albums.Album{}, fmt.Errorf("search albums: %w", err)
 	}
 
-	resolved, err := albums.Resolve(input.argument, input.artist, toAlbums(found))
+	resolved, err := albums.Resolve(argument, artist, toAlbums(found))
 	if err != nil {
 		var ambiguous *albums.AmbiguousError
 		if errors.As(err, &ambiguous) {
-			printer.Warn("%q matches %d albums:", input.argument, len(ambiguous.Matches))
+			printer.Warn("%q matches %d albums:", argument, len(ambiguous.Matches))
 			for _, match := range ambiguous.Matches {
 				printer.Info("%s  %s", match.ID, albumLabel(match))
 			}
@@ -264,4 +265,312 @@ func toAlbums(items []api.LibraryAlbum) []albums.Album {
 		result[i] = toAlbum(item)
 	}
 	return result
+}
+
+const (
+	renameModeSaveOverride = "save-override"
+	renameModeWriteOnce    = "write-once"
+	tagEditAlbumField      = "album"
+)
+
+type albumRenameOptions struct {
+	argument string
+	newName  string
+	byID     bool
+	artist   string
+	mode     string
+	yes      bool
+	dryRun   bool
+}
+
+func newAlbumRenameCommand(opts *globalOptions) *cobra.Command {
+	input := albumRenameOptions{}
+
+	cmd := &cobra.Command{
+		Use:   "rename <album> <new-name>",
+		Short: "Rename an album in the library",
+		Long: `Rename an album in the DroppedNeedle library.
+
+The album field is album-scoped, so this renames the album for every track that
+belongs to it — it is not a per-track edit.
+
+DroppedNeedle stages metadata edits: a preview is created and its state is
+checked, and only then is it applied. Applying writes the new name through the
+library management pipeline, which rewrites the tags of the album's audio files,
+so the change is confirmed interactively unless --yes is given.
+
+Use --dry-run to stage and validate the preview and then discard it without
+queuing any work. The new name must differ from the current one.`,
+		Args: cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			input.argument = args[0]
+			input.newName = args[1]
+			return runAlbumRename(cmd, opts, input)
+		},
+	}
+
+	cmd.Flags().BoolVar(&input.byID, "id", false, "treat the first argument as an exact album id and skip the library lookup")
+	cmd.Flags().StringVar(&input.artist, "artist", "", "restrict the album lookup to this artist")
+	cmd.Flags().StringVar(&input.mode, "mode", renameModeSaveOverride,
+		"how the new name is stored: save-override (future management runs keep it) or write-once")
+	cmd.Flags().BoolVarP(&input.yes, "yes", "y", false, "do not ask for confirmation")
+	cmd.Flags().BoolVar(&input.dryRun, "dry-run", false, "stage and validate the preview, then discard it without applying")
+
+	return cmd
+}
+
+func runAlbumRename(cmd *cobra.Command, opts *globalOptions, input albumRenameOptions) error {
+	printer := opts.printer()
+
+	name := strings.TrimSpace(input.newName)
+	if name == "" {
+		return errors.New("the new album name is empty")
+	}
+	mode, err := tagEditMode(input.mode)
+	if err != nil {
+		return err
+	}
+
+	cfg, err := opts.loadConfig(printer)
+	if err != nil {
+		return err
+	}
+
+	printer.Step("Authenticating with %s", strings.TrimRight(cfg.Server, "/"))
+	client, err := api.New(cfg.Server, cfg.InsecureSkipVerify)
+	if err != nil {
+		return err
+	}
+	user, err := client.Login(cmd.Context(), cfg.Username, cfg.Password)
+	if err != nil {
+		return fmt.Errorf("authentication failed: %w", err)
+	}
+	printer.Success("Signed in as %s (%s)", user.DisplayName, user.Role)
+
+	target, err := resolveAlbumTarget(cmd, printer, client, input.argument, input.byID, input.artist)
+	if err != nil {
+		return err
+	}
+
+	printer.Step("Reading the tag editor for %s", albumLabel(target))
+	tracks, err := client.ListAlbumTracks(cmd.Context(), target.ID)
+	if err != nil {
+		return fmt.Errorf("list album tracks: %w", err)
+	}
+	if len(tracks) == 0 {
+		return fmt.Errorf("album %s has no tracks to rename", albumLabel(target))
+	}
+	editor, err := client.GetTagEditor(cmd.Context(), tracks[0].ID)
+	if err != nil {
+		return fmt.Errorf("read tag editor: %w", err)
+	}
+	if !editor.AcceptedIdentity {
+		detail, detailErr := client.GetLibraryAlbum(cmd.Context(), target.ID)
+		if detailErr != nil {
+			printer.Warn("could not read the album identity state: %v", detailErr)
+			detail = nil
+		}
+		return renameRefusedError(target, editor, detail)
+	}
+	field, ok := editor.Field(tagEditAlbumField)
+	if !ok {
+		return errors.New("the tag editor does not expose an album field")
+	}
+	current := strings.TrimSpace(field.StringValue())
+	if current == name {
+		printer.Raw("")
+		printer.Success("Album is already named %q — nothing to do", name)
+		return nil
+	}
+
+	idempotencyKey, err := api.NewIdempotencyKey()
+	if err != nil {
+		return err
+	}
+	printer.Step("Staging the rename %q → %q (%s)", current, name, input.mode)
+	ref, err := client.CreateTagEditPreview(cmd.Context(), api.TagEditPreviewRequest{
+		LocalTrackID:             editor.LocalTrackID,
+		Mode:                     mode,
+		ExpectedSettingsRevision: editor.SettingsRevision,
+		ExpectedPolicyRevision:   editor.PolicyRevision,
+		Fields:                   []api.TagEditField{{FieldName: tagEditAlbumField, Value: name}},
+		IdempotencyKey:           idempotencyKey,
+	})
+	if err != nil {
+		return fmt.Errorf("stage rename: %w", err)
+	}
+
+	printRenamePreview(printer, target, current, name, input.mode, ref)
+
+	preview, err := client.GetManagementPreview(cmd.Context(), ref.JobID)
+	if err != nil {
+		return fmt.Errorf("read staged preview: %w", err)
+	}
+	if blocker := previewBlocker(preview); blocker != nil {
+		discardPreview(cmd, client, printer, ref.JobID)
+		return blocker
+	}
+
+	if input.dryRun {
+		discardPreview(cmd, client, printer, ref.JobID)
+		printer.Raw("")
+		printer.Success("Dry run complete — the preview was discarded and nothing was applied")
+		return nil
+	}
+
+	if !input.yes {
+		confirmed, err := confirmRename(cmd, printer, current, name, len(tracks))
+		if err != nil {
+			return err
+		}
+		if !confirmed {
+			discardPreview(cmd, client, printer, ref.JobID)
+			printer.Warn("aborted — nothing was renamed")
+			return nil
+		}
+	}
+
+	applyKey, err := api.NewIdempotencyKey()
+	if err != nil {
+		return err
+	}
+	operation, err := client.ApplyManagementPreview(cmd.Context(), ref.JobID, api.ApplyPreviewRequest{
+		PreviewToken:                 ref.PreviewToken,
+		ExpectedOperationRowRevision: preview.OperationRowRevision,
+		IdempotencyKey:               applyKey,
+		Confirmation:                 true,
+	})
+	if err != nil {
+		return fmt.Errorf("apply rename: %w", err)
+	}
+
+	printer.Raw("")
+	printer.Success("Rename queued")
+	printer.Field("album", target.Title)
+	printer.Field("from", current)
+	printer.Field("to", name)
+	printer.Field("mode", input.mode)
+	if operation != nil && operation.ID != "" {
+		printer.Field("operation", operation.ID)
+	}
+	printer.Info("the library management pipeline applies this in the background")
+	return nil
+}
+
+// tagEditMode maps the CLI flag to the mode the API expects.
+func tagEditMode(flag string) (string, error) {
+	switch flag {
+	case renameModeSaveOverride:
+		return api.TagEditModeSaveOverride, nil
+	case renameModeWriteOnce:
+		return api.TagEditModeWriteOnce, nil
+	default:
+		return "", fmt.Errorf("unknown mode %q (use %s or %s)", flag, renameModeSaveOverride, renameModeWriteOnce)
+	}
+}
+
+// previewBlocker explains why a staged preview cannot be applied yet, or nil
+// when it is ready.
+func previewBlocker(preview *api.ManagementPreview) error {
+	if preview == nil {
+		return errors.New("the server did not return the staged preview")
+	}
+	if preview.Expired {
+		return errors.New("the staged preview expired — run the command again")
+	}
+	if preview.Stale {
+		reason := strings.Join(preview.StaleReasons, "; ")
+		if reason == "" {
+			reason = "the album changed while the preview was staged"
+		}
+		return fmt.Errorf("the staged preview is stale: %s", reason)
+	}
+	if len(preview.OperationRowRevision) == 0 {
+		return errors.New("the staged preview cannot be applied (the server did not return a revision to confirm)")
+	}
+	if !preview.ReadyForConfirmation {
+		state := preview.State
+		if state == "" {
+			state = "not ready"
+		}
+		return fmt.Errorf("the staged preview is not ready to apply (%s)", state)
+	}
+	return nil
+}
+
+// renameRefusedError explains why the tag editor refuses metadata edits. The
+// album's identity state is included when it could be read, because that names
+// the review the user has to resolve first.
+func renameRefusedError(target albums.Album, editor *api.TagEditor, detail *api.LibraryAlbum) error {
+	reason := "IDENTITY_NOT_ACCEPTED"
+	if editor != nil && editor.IdentityReason != nil && strings.TrimSpace(*editor.IdentityReason) != "" {
+		reason = strings.TrimSpace(*editor.IdentityReason)
+	}
+
+	message := fmt.Sprintf("album %s cannot be renamed: its MusicBrainz identity has not been accepted (%s)",
+		albumLabel(target), reason)
+	if detail != nil {
+		if summary := identitySummary(*detail); summary != "" {
+			message = fmt.Sprintf("album %s cannot be renamed: its MusicBrainz identity has not been accepted (%s · %s)",
+				albumLabel(target), reason, summary)
+		}
+	}
+	return errors.New(message + "; resolve the album's identity in DroppedNeedle first, then re-run this command")
+}
+
+// identitySummary renders the album identity fields that explain a refusal.
+func identitySummary(album api.LibraryAlbum) string {
+	parts := make([]string, 0, 3)
+	if album.AlbumIdentityState != "" {
+		parts = append(parts, "state "+album.AlbumIdentityState)
+	}
+	if album.IdentificationStatus != "" {
+		parts = append(parts, "identification "+album.IdentificationStatus)
+	}
+	if album.ReviewID != nil && strings.TrimSpace(*album.ReviewID) != "" {
+		parts = append(parts, "review "+strings.TrimSpace(*album.ReviewID))
+	}
+	return strings.Join(parts, " · ")
+}
+
+func printRenamePreview(printer *output.Printer, target albums.Album, current, name, mode string, ref *api.PreviewRef) {
+	printer.Raw("")
+	printer.Field("album", albumLabel(target))
+	printer.Field("id", target.ID)
+	printer.Field("from", current)
+	printer.Field("to", name)
+	printer.Field("mode", mode)
+	if ref != nil {
+		printer.Field("preview", ref.JobID)
+	}
+}
+
+func discardPreview(cmd *cobra.Command, client *api.Client, printer *output.Printer, jobID string) {
+	if err := client.DiscardManagementPreview(cmd.Context(), jobID); err != nil {
+		printer.Warn("could not discard the preview job %s: %v", jobID, err)
+	}
+}
+
+func confirmRename(cmd *cobra.Command, printer *output.Printer, current, name string, trackCount int) (bool, error) {
+	stdinFile, isFile := cmd.InOrStdin().(*os.File)
+	if !isFile || !output.IsTerminal(stdinFile) {
+		return false, errors.New("refusing to rename without confirmation; re-run with --yes")
+	}
+
+	printer.Raw("")
+	printer.Warn("applying this writes the new name into the tags of all %s of this album",
+		output.CountLabel(trackCount, "track"))
+
+	fmt.Fprintf(cmd.OutOrStdout(), "Rename %q to %q? [y/N]: ", current, name)
+	reader := bufio.NewReader(cmd.InOrStdin())
+	line, err := reader.ReadString('\n')
+	if err != nil && !errors.Is(err, io.EOF) {
+		return false, fmt.Errorf("read confirmation: %w", err)
+	}
+	switch strings.ToLower(strings.TrimSpace(line)) {
+	case "y", "yes":
+		return true, nil
+	default:
+		return false, nil
+	}
 }

@@ -1,5 +1,7 @@
 package api
 
+import "encoding/json"
+
 // User is the authenticated account returned by the auth endpoints.
 type User struct {
 	ID          string `json:"id"`
@@ -51,6 +53,11 @@ type LibraryAlbum struct {
 	TotalSizeBytes            int64   `json:"total_size_bytes"`
 	Format                    *string `json:"format"`
 	Year                      *int    `json:"year"`
+	// Identity fields, only present on the album detail response. They explain
+	// why metadata edits can be refused.
+	IdentificationStatus        string  `json:"identification_status"`
+	ReviewID                    *string `json:"review_id"`
+	ManagementIdentityReadiness string  `json:"management_identity_readiness"`
 }
 
 type libraryAlbumsResponse struct {
@@ -150,4 +157,103 @@ type removeTracksRequest struct {
 
 type resolveSourcesResponse struct {
 	Sources map[string][]string `json:"sources"`
+}
+
+// TagField is one editable metadata field of the library management tag editor.
+// CurrentValue is a string, a list of strings, a number, a bool or null
+// depending on Cardinality.
+type TagField struct {
+	FieldName    string  `json:"field_name"`
+	Scope        string  `json:"scope"`
+	Cardinality  string  `json:"cardinality"`
+	CurrentValue any     `json:"current_value"`
+	OverrideID   *string `json:"override_id"`
+	OverrideMode *string `json:"override_mode"`
+}
+
+// StringValue returns the current value when the field holds a plain string.
+func (f TagField) StringValue() string {
+	if value, ok := f.CurrentValue.(string); ok {
+		return value
+	}
+	return ""
+}
+
+// TagEditor is the editable metadata of one library track. Fields scoped to the
+// album (such as "album") change for every track of that album.
+type TagEditor struct {
+	LocalTrackID     string     `json:"local_track_id"`
+	LocalAlbumID     string     `json:"local_album_id"`
+	ProfileName      string     `json:"profile_name"`
+	SettingsRevision string     `json:"settings_revision"`
+	PolicyRevision   string     `json:"policy_revision"`
+	AcceptedIdentity bool       `json:"accepted_identity"`
+	IdentityReason   *string    `json:"identity_reason"`
+	Fields           []TagField `json:"fields"`
+}
+
+// Field returns the editor field with the given name.
+func (e TagEditor) Field(name string) (TagField, bool) {
+	for _, field := range e.Fields {
+		if field.FieldName == name {
+			return field, true
+		}
+	}
+	return TagField{}, false
+}
+
+// TagEdit modes accepted by the tag edit preview endpoint.
+const (
+	TagEditModeSaveOverride   = "save_override"
+	TagEditModeWriteOnce      = "write_once"
+	TagEditModeResetCanonical = "reset_canonical"
+)
+
+// TagEditField is one field change of a tag edit preview. Value is omitted when
+// the field is being reset to its canonical value.
+type TagEditField struct {
+	FieldName string `json:"field_name"`
+	Value     any    `json:"value,omitempty"`
+}
+
+// TagEditPreviewRequest is the body of POST /library/management/tag-edit-previews.
+type TagEditPreviewRequest struct {
+	LocalTrackID             string         `json:"local_track_id"`
+	Mode                     string         `json:"mode"`
+	ExpectedSettingsRevision string         `json:"expected_settings_revision"`
+	ExpectedPolicyRevision   string         `json:"expected_policy_revision"`
+	Fields                   []TagEditField `json:"fields"`
+	IdempotencyKey           string         `json:"idempotency_key"`
+}
+
+// PreviewRef is returned when a management preview is created.
+type PreviewRef struct {
+	JobID        string `json:"job_id"`
+	PreviewToken string `json:"preview_token"`
+}
+
+// ManagementPreview is the state of a staged management job. OperationRowRevision
+// is echoed back verbatim on apply, so it is kept raw to avoid guessing its type.
+type ManagementPreview struct {
+	ID                   string          `json:"id"`
+	JobID                string          `json:"job_id"`
+	State                string          `json:"state"`
+	Stale                bool            `json:"stale"`
+	StaleReasons         []string        `json:"stale_reasons"`
+	Expired              bool            `json:"expired"`
+	ReadyForConfirmation bool            `json:"ready_for_confirmation"`
+	OperationRowRevision json.RawMessage `json:"operation_row_revision"`
+}
+
+// ApplyPreviewRequest is the body of POST /library/management/previews/{id}/apply.
+type ApplyPreviewRequest struct {
+	PreviewToken                 string          `json:"preview_token"`
+	ExpectedOperationRowRevision json.RawMessage `json:"expected_operation_row_revision"`
+	IdempotencyKey               string          `json:"idempotency_key"`
+	Confirmation                 bool            `json:"confirmation"`
+}
+
+// OperationRef identifies the queued operation an applied preview produced.
+type OperationRef struct {
+	ID string `json:"id"`
 }

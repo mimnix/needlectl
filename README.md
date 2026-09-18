@@ -30,6 +30,10 @@ were imported before the track was available are relinked once it appears.
   their disc/track number and picked with `--track`/`--disc`) and removes it.
   Note that the DroppedNeedle API always deletes the track's file from disk for
   this operation.
+- **Album rename** — `needlectl album rename` renames an album through
+  DroppedNeedle's staged tag-edit flow (stage a preview, verify it, then apply).
+  The album field is album-scoped, so every track of the album is updated, and
+  the rename is written into the audio files by the library management pipeline.
 - **Playlist relinking** — `needlectl playlist relink` scans an existing playlist
   and links the entries that have no source yet to matching library files. Entries
   that already play are left untouched, so a working link is never replaced.
@@ -203,6 +207,66 @@ Flags:
 
 > **Warning:** by default the audio files are deleted from disk. Pass
 > `--keep-files` to remove only the catalog entry, and `--dry-run` to preview.
+
+### `needlectl album rename <album> <new-name>`
+
+Renames an album in the library. The album field is **album-scoped**, so this
+renames it for every track that belongs to the album — there is no per-track
+variant of this operation.
+
+DroppedNeedle stages metadata edits rather than applying them directly, and
+`needlectl` follows that flow: it reads the tag editor, stages a *tag edit
+preview*, checks that the preview is ready, and only then applies it. Applying
+writes the new name through the library management pipeline, which rewrites the
+album's audio file tags in the background.
+
+```
+$ needlectl album rename "Elza" "Elza (Deluxe)" --artist "神崎エルザ"
+› Authenticating with https://music.example.com
+✓ Signed in as Admin (admin)
+› Looking up album "Elza" in the library
+› Reading the tag editor for Elza — 神崎エルザ
+› Staging the rename "Elza" → "Elza (Deluxe)" (save-override)
+
+  album:       Elza — 神崎エルザ
+  id:          9c2b…
+  from:        Elza
+  to:          Elza (Deluxe)
+  mode:        save-override
+  preview:     4f8c…
+
+! applying this writes the new name into the tags of all 12 tracks of this album
+Rename "Elza" to "Elza (Deluxe)"? [y/N]: y
+
+✓ Rename queued
+  album:       Elza
+  from:        Elza
+  to:          Elza (Deluxe)
+  mode:        save-override
+  operation:   op_01H…
+  the library management pipeline applies this in the background
+```
+
+Flags:
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--id` | `false` | Treat the first argument as an exact album id and skip the lookup. |
+| `--artist string` | | Restrict the album lookup to this artist. |
+| `--mode string` | `save-override` | `save-override` stores a local override that future management runs keep; `write-once` writes the value once and a later authoritative run may replace it. |
+| `-y, --yes` | `false` | Do not ask for confirmation (required in non-interactive sessions). |
+| `--dry-run` | `false` | Stage and validate the preview, then discard it without applying. |
+
+> **This writes to your audio files.** The rename is not a database-only change:
+> it is published through DroppedNeedle's file organization, which rewrites the
+> tags of the album's tracks. That is why the change is always confirmed and why
+> `--dry-run` stages a real preview before discarding it.
+
+If the new name equals the current one the command is a no-op. If the album's
+identity has not been accepted yet, the command refuses **before staging anything**
+and names the album's identity state, identification status and review — those
+have to be resolved in DroppedNeedle first. If the staged preview comes back
+stale, expired or not ready, nothing is applied and the reason is reported.
 
 ### `needlectl track delete <track>`
 
@@ -495,6 +559,12 @@ Endpoints used, all under `/api/v1`:
 | `GET /library/albums/{id}` | Album detail (used by `album delete --id`) |
 | `DELETE /library/album/{id}?delete_files=&stop_wanted=` | Remove an album and cascade its tracks |
 | `DELETE /library/tracks/{id}` | Remove a single track (always deletes its file) |
+| `GET /library/albums/{id}/tracks` | Album track list (used to open the tag editor) |
+| `GET /library/management/tracks/{id}/tag-editor` | Editable metadata fields, scopes and revisions |
+| `POST /library/management/tag-edit-previews` | Stage a metadata edit (`local_track_id`, `mode`, `fields`, `expected_settings_revision`, `expected_policy_revision`, `idempotency_key`) |
+| `GET /library/management/previews/{id}` | Staged preview state (`ready_for_confirmation`, `operation_row_revision`) |
+| `POST /library/management/previews/{id}/apply` | Apply a preview (`preview_token`, `expected_operation_row_revision`, `idempotency_key`, `confirmation`) |
+| `POST /library/management/previews/{id}/discard` | Abandon a staged preview without applying it |
 
 Authentication uses `Authorization: Bearer <token>`. An entry is considered
 *linked* when it has a `library_file_id`, a `track_source_id`, or a non-empty
@@ -519,6 +589,13 @@ Authentication uses `Authorization: Bearer <token>`. An entry is considered
 > without a cover contribute neither per-track art nor a playlist image.
 > `/api/v1/covers/release-group/{id}` takes the album's MusicBrainz release-group
 > id, which is the `album_id` of a library track.
+>
+> Library management (used by `album rename`) must be active on the instance. Its
+> edits are **staged, journalled and published through file organization**: a
+> preview is created, then applied with its `preview_token` and the
+> `operation_row_revision` it reported. Field `scope` matters — `album`,
+> `album_artist` and the `*_sort` fields are album-scoped, while `title` and
+> `artist` are track-scoped. These endpoints rewrite audio file tags.
 >
 > `POST /playlists/{id}/resolve-sources` only resolves entries that have both an
 > `album_id` (MusicBrainz release-group id) and a `track_number`; entries without
@@ -549,7 +626,7 @@ cmd/
   root.go                    root command, global flags, config loading
   login.go                   interactive login
   import.go                  import command and summary
-  album.go                   album delete command and confirmation
+  album.go                   album delete + album rename commands
   track.go                   track delete command and confirmation
   playlist.go                playlist relink command and summary
 internal/
@@ -585,6 +662,12 @@ is tested with `httptest` and each runner with an in-memory fake API.
 | `refusing to guess: narrow the search with --artist/--album, or pass --id` | More than one track matched across albums. Re-run with `--artist`/`--album`, or copy the id from the listed candidates and use `--id`. |
 | `refusing to guess: these matches share the album …` | Same-named tracks on one album, where `--artist`/`--album` cannot help. Re-run with `--track` (add `--disc` for multi-disc albums), or copy the id and use `--id`. |
 | `--id cannot be combined with --artist, --album, --track or --disc` | `--id` skips the lookup, so the narrowing flags would be silently ignored. Pass one or the other. |
+| `the staged preview is stale: …` | The album or the management settings changed between reading the tag editor and applying. Re-run `album rename`. |
+| `the staged preview expired — run the command again` | Previews have a lifetime. Re-run `album rename` to stage a fresh one. |
+| `the staged preview is not ready to apply (…)` | The server is still validating, or found no eligible files. Nothing was applied; check the instance's library management status. |
+| `album … cannot be renamed: its MusicBrainz identity has not been accepted (…)` | DroppedNeedle only allows metadata edits on albums whose identity is accepted. The message names the album state, the identification status and the review. Resolve that review first (accept the candidate, retry identification, keep-tagged, or `reidentify` the album), or tag the files with MusicBrainz ids and rescan. Nothing was staged. |
+| `applying this writes the new name into the tags …` then `aborted` | You answered no to the confirmation, so the staged preview was discarded and nothing changed. |
+| `unknown mode "…" (use save-override or write-once)` | Fix the `--mode` value. |
 | `refusing to delete without confirmation; re-run with --yes` | The album delete ran without a terminal. Pass `--yes` to confirm non-interactively. |
 | `too many albums match …` | The album query was too broad to page through. Refine the query or use `--id`. |
 | `playlist "…" not found` | Check the name (`needlectl playlist relink` matches case-insensitively), or pass the id with `--id`. |
@@ -614,12 +697,19 @@ exports and `~/.needlectl.conf` private.
 - `playlist relink` only touches entries that have no source at all. Entries that
   play through another source (Navidrome, Plex, Jellyfin) already have a link, so
   they are never re-pointed at the local library.
+- `album rename` is not a per-track operation: the album field is album-scoped, so
+  the whole album is renamed. It also requires library management to be active and
+  writes the new name into the audio file tags through the server's file
+  organization, so it is staged, confirmed and applied rather than applied
+  immediately. `needlectl` cannot rename a single track's album on its own — that
+  would be `POST /library/tracks/move` or an album split, which are not wrapped
+  yet.
 - Duration is stored but not used as a matching guard, so live/remix versions
   with very similar titles could be linked to the wrong file.
 - The password is stored in plain text in a `0600` file; an OS keyring backend
   would remove that class of risk.
 - The commands implemented so far are `login`, `import`, `album delete`,
-  `track delete` and `playlist relink`.
+  `album rename`, `track delete` and `playlist relink`.
 
 ## License
 

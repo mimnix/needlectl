@@ -5,6 +5,7 @@ package api
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"crypto/tls"
 	"encoding/json"
 	"errors"
@@ -342,6 +343,117 @@ func (c *Client) ResolveSources(ctx context.Context, playlistID string) (map[str
 		return nil, fmt.Errorf("decode resolved sources: %w", err)
 	}
 	return resp.Sources, nil
+}
+
+// ListAlbumTracks returns the library tracks of one album.
+func (c *Client) ListAlbumTracks(ctx context.Context, albumID string) ([]LibraryTrack, error) {
+	var all []LibraryTrack
+	offset := 0
+
+	for page := 0; page < maxLibraryPages; page++ {
+		params := url.Values{}
+		params.Set("limit", strconv.Itoa(libraryPageSize))
+		params.Set("offset", strconv.Itoa(offset))
+
+		path := "/api/v1/library/albums/" + url.PathEscape(albumID) + "/tracks?" + params.Encode()
+		data, err := c.do(ctx, http.MethodGet, path, nil)
+		if err != nil {
+			return nil, err
+		}
+		var resp libraryTracksResponse
+		if err := json.Unmarshal(data, &resp); err != nil {
+			return nil, fmt.Errorf("decode album tracks: %w", err)
+		}
+		if len(resp.Items) == 0 {
+			return all, nil
+		}
+		all = append(all, resp.Items...)
+		offset += len(resp.Items)
+		if resp.Total > 0 && offset >= resp.Total {
+			return all, nil
+		}
+	}
+	return nil, fmt.Errorf("album %s has too many tracks to list", albumID)
+}
+
+// GetTagEditor returns the editable metadata of one library track.
+//
+// Fields scoped to the album (notably "album" itself) apply to every track of
+// that album, so this is the entry point for renaming an album.
+func (c *Client) GetTagEditor(ctx context.Context, trackID string) (*TagEditor, error) {
+	path := "/api/v1/library/management/tracks/" + url.PathEscape(trackID) + "/tag-editor"
+	data, err := c.do(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return nil, err
+	}
+	var editor TagEditor
+	if err := json.Unmarshal(data, &editor); err != nil {
+		return nil, fmt.Errorf("decode tag editor: %w", err)
+	}
+	return &editor, nil
+}
+
+// CreateTagEditPreview stages metadata changes and returns the job to confirm.
+func (c *Client) CreateTagEditPreview(ctx context.Context, request TagEditPreviewRequest) (*PreviewRef, error) {
+	data, err := c.do(ctx, http.MethodPost, "/api/v1/library/management/tag-edit-previews", request)
+	if err != nil {
+		return nil, err
+	}
+	var ref PreviewRef
+	if err := json.Unmarshal(data, &ref); err != nil {
+		return nil, fmt.Errorf("decode tag edit preview: %w", err)
+	}
+	if ref.JobID == "" {
+		return nil, errors.New("the server did not return a preview job")
+	}
+	return &ref, nil
+}
+
+// GetManagementPreview returns the state of a staged management job.
+func (c *Client) GetManagementPreview(ctx context.Context, jobID string) (*ManagementPreview, error) {
+	path := "/api/v1/library/management/previews/" + url.PathEscape(jobID)
+	data, err := c.do(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return nil, err
+	}
+	var preview ManagementPreview
+	if err := json.Unmarshal(data, &preview); err != nil {
+		return nil, fmt.Errorf("decode management preview: %w", err)
+	}
+	return &preview, nil
+}
+
+// ApplyManagementPreview confirms a staged job and queues the work.
+func (c *Client) ApplyManagementPreview(ctx context.Context, jobID string, request ApplyPreviewRequest) (*OperationRef, error) {
+	path := "/api/v1/library/management/previews/" + url.PathEscape(jobID) + "/apply"
+	data, err := c.do(ctx, http.MethodPost, path, request)
+	if err != nil {
+		return nil, err
+	}
+	var ref OperationRef
+	if err := json.Unmarshal(data, &ref); err != nil {
+		return nil, fmt.Errorf("decode applied preview: %w", err)
+	}
+	return &ref, nil
+}
+
+// DiscardManagementPreview abandons a staged job without applying it.
+func (c *Client) DiscardManagementPreview(ctx context.Context, jobID string) error {
+	path := "/api/v1/library/management/previews/" + url.PathEscape(jobID) + "/discard"
+	_, err := c.do(ctx, http.MethodPost, path, map[string]any{})
+	return err
+}
+
+// NewIdempotencyKey returns a random RFC 4122 version 4 UUID for request bodies
+// that must not be applied twice.
+func NewIdempotencyKey() (string, error) {
+	var buf [16]byte
+	if _, err := rand.Read(buf[:]); err != nil {
+		return "", fmt.Errorf("generate idempotency key: %w", err)
+	}
+	buf[6] = (buf[6] & 0x0f) | 0x40
+	buf[8] = (buf[8] & 0x3f) | 0x80
+	return fmt.Sprintf("%x-%x-%x-%x-%x", buf[0:4], buf[4:6], buf[6:8], buf[8:10], buf[10:16]), nil
 }
 
 func (c *Client) do(ctx context.Context, method, path string, body any) ([]byte, error) {
