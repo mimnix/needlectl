@@ -166,3 +166,67 @@ func TestTrackDeleteRejectsFlagsThatWouldBeIgnored(t *testing.T) {
 		}
 	}
 }
+
+func TestValidateTrackFilter(t *testing.T) {
+	if err := validateTrackFilter(false, "LiSA", "Launcher", 3, 1); err != nil {
+		t.Errorf("narrowing without --id returned error: %v", err)
+	}
+	if err := validateTrackFilter(true, "", "", 0, 0); err != nil {
+		t.Errorf("--id alone returned error: %v", err)
+	}
+
+	for _, tc := range []struct {
+		artist string
+		album  string
+		track  int
+		disc   int
+	}{
+		{artist: "LiSA"},
+		{album: "Launcher"},
+		{track: 3},
+		{disc: 2},
+	} {
+		if err := validateTrackFilter(true, tc.artist, tc.album, tc.track, tc.disc); err == nil {
+			t.Errorf("validateTrackFilter(--id, %+v) returned nil, want a failure", tc)
+		}
+	}
+}
+
+func TestTrackCommandRegistersRename(t *testing.T) {
+	track := newTrackCommand(&globalOptions{})
+
+	for _, command := range track.Commands() {
+		if command.Name() == "rename" {
+			return
+		}
+	}
+	t.Error("track command does not register rename")
+}
+
+func TestTrackRenameRequiresTwoArguments(t *testing.T) {
+	for _, args := range [][]string{
+		{"track", "rename"},
+		{"track", "rename", "Disorder"},
+	} {
+		root := newRootCommand()
+		root.SetArgs(args)
+		root.SetOut(&bytes.Buffer{})
+		root.SetErr(&bytes.Buffer{})
+
+		if err := root.Execute(); err == nil {
+			t.Errorf("%v returned nil error, want a failure", args)
+		}
+	}
+}
+
+func TestTrackRenameRejectsIDWithNarrowingFlags(t *testing.T) {
+	root := newRootCommand()
+	root.SetArgs([]string{"track", "rename", "abc", "New Title", "--id", "--track", "3"})
+	root.SetOut(&bytes.Buffer{})
+	root.SetErr(&bytes.Buffer{})
+
+	err := root.Execute()
+	if err == nil || !strings.Contains(err.Error(), "cannot be combined") {
+		t.Errorf("error = %v, want the conflicting-flags message", err)
+	}
+}

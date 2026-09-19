@@ -34,6 +34,8 @@ were imported before the track was available are relinked once it appears.
   DroppedNeedle's staged tag-edit flow (stage a preview, verify it, then apply).
   The album field is album-scoped, so every track of the album is updated, and
   the rename is written into the audio files by the library management pipeline.
+- **Track rename** — `needlectl track rename` does the same for a single track's
+  title, which is track-scoped and leaves the rest of the album untouched.
 - **Playlist relinking** — `needlectl playlist relink` scans an existing playlist
   and links the entries that have no source yet to matching library files. Entries
   that already play are left untouched, so a working link is never replaced.
@@ -342,6 +344,66 @@ Flags:
 > want to drop catalog entries, use `album delete --keep-files` (album scope)
 > instead.
 
+### `needlectl track rename <track> <new-title>`
+
+Renames a single track in the library. Only the track's **title** changes: the
+`title` field is track-scoped, so the rest of the album is untouched — use
+`album rename` to rename the album itself.
+
+The track is looked up by name and must match **exactly one** library track; use
+`--artist`, `--album`, `--track` and/or `--disc` to narrow the search, or `--id`
+for an exact track id.
+
+It follows the same staged flow as `album rename`: the tag editor is read, a
+preview is staged and checked, and only then is it applied. Applying writes the
+new title into the track's audio file tags through the library management
+pipeline, so the change is confirmed interactively unless `--yes` is given.
+
+```
+$ needlectl track rename "Disorder" "Disorder (Live)" --artist "神崎エルザ"
+› Authenticating with https://music.example.com
+✓ Signed in as Mimmo (admin)
+› Looking up track "Disorder" in the library
+› Reading the tag editor for track Disorder — 神崎エルザ
+› Staging the rename "Disorder" → "Disorder (Live)" (save-override)
+
+  track:       Disorder — 神崎エルザ
+  id:          t-1
+  from:        Disorder
+  to:          Disorder (Live)
+  mode:        save-override
+  preview:     job-1
+
+! applying this writes the new title into the tags of this track's audio file
+Rename "Disorder" to "Disorder (Live)"? [y/N]: y
+
+✓ Rename queued
+  track:       Disorder — 神崎エルザ
+  id:          t-1
+  from:        Disorder
+  to:          Disorder (Live)
+  mode:        save-override
+  operation:   op_01H…
+  the library management pipeline applies this in the background
+```
+
+Flags:
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--id` | `false` | Treat the first argument as an exact track id and skip the library lookup. Cannot be combined with the narrowing flags below. |
+| `--artist string` | | Restrict the track lookup to this artist. |
+| `--album string` | | Restrict the track lookup to this album. |
+| `--track int` | `0` | Restrict the track lookup to this track number. |
+| `--disc int` | `0` | Restrict the track lookup to this disc number. |
+| `--mode string` | `save-override` | `save-override` stores a local override that future management runs keep; `write-once` writes the value once and a later authoritative run may replace it. |
+| `-y, --yes` | `false` | Do not ask for confirmation (required in non-interactive sessions). |
+| `--dry-run` | `false` | Stage and validate the preview, then discard it without applying. |
+
+If the new title equals the current one the command is a no-op. The album's
+MusicBrainz identity must already be accepted — the same gate as `album rename` —
+and the refusal names the album state and review to resolve.
+
 ### `needlectl playlist relink <playlist>`
 
 Scans the tracks of an existing playlist and links the ones that cannot be played
@@ -590,7 +652,8 @@ Authentication uses `Authorization: Bearer <token>`. An entry is considered
 > `/api/v1/covers/release-group/{id}` takes the album's MusicBrainz release-group
 > id, which is the `album_id` of a library track.
 >
-> Library management (used by `album rename`) must be active on the instance. Its
+> Library management (used by `album rename` and `track rename`) must be active
+> on the instance. Its
 > edits are **staged, journalled and published through file organization**: a
 > preview is created, then applied with its `preview_token` and the
 > `operation_row_revision` it reported. Field `scope` matters — `album`,
@@ -627,7 +690,8 @@ cmd/
   login.go                   interactive login
   import.go                  import command and summary
   album.go                   album delete + album rename commands
-  track.go                   track delete command and confirmation
+  track.go                   track delete + track rename commands
+  tag_edit.go                shared staged tag-edit flow (preview, confirm, apply)
   playlist.go                playlist relink command and summary
 internal/
   config/                    ~/.needlectl.conf load/save/validation
@@ -665,7 +729,7 @@ is tested with `httptest` and each runner with an in-memory fake API.
 | `the staged preview is stale: …` | The album or the management settings changed between reading the tag editor and applying. Re-run `album rename`. |
 | `the staged preview expired — run the command again` | Previews have a lifetime. Re-run `album rename` to stage a fresh one. |
 | `the staged preview is not ready to apply (…)` | The server is still validating, or found no eligible files. Nothing was applied; check the instance's library management status. |
-| `album … cannot be renamed: its MusicBrainz identity has not been accepted (…)` | DroppedNeedle only allows metadata edits on albums whose identity is accepted. The message names the album state, the identification status and the review. Resolve that review first (accept the candidate, retry identification, keep-tagged, or `reidentify` the album), or tag the files with MusicBrainz ids and rescan. Nothing was staged. |
+| `album …` / `track …` `cannot be renamed: its MusicBrainz identity has not been accepted (…)` | DroppedNeedle only allows metadata edits on albums whose identity is accepted, and a track's edits depend on its album. The message names the album state, the identification status and the review. Resolve that review first (accept the candidate, retry identification, keep-tagged, or `reidentify` the album), or tag the files with MusicBrainz ids and rescan. Nothing was staged. |
 | `applying this writes the new name into the tags …` then `aborted` | You answered no to the confirmation, so the staged preview was discarded and nothing changed. |
 | `unknown mode "…" (use save-override or write-once)` | Fix the `--mode` value. |
 | `refusing to delete without confirmation; re-run with --yes` | The album delete ran without a terminal. Pass `--yes` to confirm non-interactively. |
@@ -697,19 +761,18 @@ exports and `~/.needlectl.conf` private.
 - `playlist relink` only touches entries that have no source at all. Entries that
   play through another source (Navidrome, Plex, Jellyfin) already have a link, so
   they are never re-pointed at the local library.
-- `album rename` is not a per-track operation: the album field is album-scoped, so
-  the whole album is renamed. It also requires library management to be active and
-  writes the new name into the audio file tags through the server's file
-  organization, so it is staged, confirmed and applied rather than applied
-  immediately. `needlectl` cannot rename a single track's album on its own — that
-  would be `POST /library/tracks/move` or an album split, which are not wrapped
-  yet.
+- `album rename` changes the album field, which is album-scoped, so the whole
+  album is renamed. `track rename` changes only the track's `title`. Both require
+  library management to be active and write into the audio file tags through the
+  server's file organization, so they are staged, confirmed and applied rather
+  than applied immediately. Other track-scoped fields (`artist`, `genre`, …) are
+  not exposed as flags yet, and the server's identity gate applies to both.
 - Duration is stored but not used as a matching guard, so live/remix versions
   with very similar titles could be linked to the wrong file.
 - The password is stored in plain text in a `0600` file; an OS keyring backend
   would remove that class of risk.
 - The commands implemented so far are `login`, `import`, `album delete`,
-  `album rename`, `track delete` and `playlist relink`.
+  `album rename`, `track delete`, `track rename` and `playlist relink`.
 
 ## License
 
