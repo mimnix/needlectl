@@ -257,3 +257,90 @@ type ApplyPreviewRequest struct {
 type OperationRef struct {
 	ID string `json:"id"`
 }
+
+// Item statuses reported by the drop import endpoints.
+const (
+	ImportStatusImported    = "imported"
+	ImportStatusNeedsReview = "needs_review"
+	ImportStatusDiscarded   = "discarded"
+)
+
+// ImportItem is one group of uploaded files inside an import job. DroppedNeedle
+// identifies an item as a unit, so matching always names an item rather than an
+// individual file.
+type ImportItem struct {
+	ID               int     `json:"id"`
+	FolderName       string  `json:"folder_name"`
+	Status           string  `json:"status"`
+	UpdatedAt        float64 `json:"updated_at"`
+	ReleaseGroupMBID *string `json:"release_group_mbid"`
+	AlbumTitle       *string `json:"album_title"`
+	ArtistName       *string `json:"artist_name"`
+	FilesTotal       int     `json:"files_total"`
+	FilesImported    int     `json:"files_imported"`
+	Detail           *string `json:"detail"`
+}
+
+// NeedsReview reports whether DroppedNeedle could not identify the item and is
+// waiting for a manual match.
+func (i ImportItem) NeedsReview() bool { return i.Status == ImportStatusNeedsReview }
+
+// Settled reports whether the item reached a final state on its own and will not
+// change again while it is polled.
+func (i ImportItem) Settled() bool {
+	switch i.Status {
+	case ImportStatusImported, ImportStatusNeedsReview, ImportStatusDiscarded:
+		return true
+	}
+	return false
+}
+
+// Title returns the album title of the item, or an empty string when unknown.
+func (i ImportItem) Title() string { return derefString(i.AlbumTitle) }
+
+// Artist returns the album artist of the item, or an empty string when unknown.
+func (i ImportItem) Artist() string { return derefString(i.ArtistName) }
+
+// Message returns the server detail for the item, or an empty string.
+func (i ImportItem) Message() string { return derefString(i.Detail) }
+
+// MatchedReleaseGroup returns the release group the item was matched to, or an
+// empty string when it is still unbound.
+func (i ImportItem) MatchedReleaseGroup() string { return derefString(i.ReleaseGroupMBID) }
+
+func derefString(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
+}
+
+// ImportJob is one upload batch: the files sent in a single request and the
+// items DroppedNeedle derived from them.
+type ImportJob struct {
+	ID         string       `json:"id"`
+	Status     string       `json:"status"`
+	CreatedAt  float64      `json:"created_at"`
+	UploadName string       `json:"upload_name"`
+	UserID     string       `json:"user_id"`
+	UserName   string       `json:"user_name"`
+	Error      *string      `json:"error"`
+	Items      []ImportItem `json:"items"`
+}
+
+// Settled reports whether every item of the job reached a final state.
+func (j ImportJob) Settled() bool {
+	for _, item := range j.Items {
+		if !item.Settled() {
+			return false
+		}
+	}
+	return true
+}
+
+// ErrorMessage returns the job level error, or an empty string when there is none.
+func (j ImportJob) ErrorMessage() string { return derefString(j.Error) }
+
+type importJobsResponse struct {
+	Jobs []ImportJob `json:"jobs"`
+}

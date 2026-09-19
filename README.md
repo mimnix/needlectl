@@ -39,6 +39,10 @@ were imported before the track was available are relinked once it appears.
 - **Playlist relinking** — `needlectl playlist relink` scans an existing playlist
   and links the entries that have no source yet to matching library files. Entries
   that already play are left untouched, so a working link is never replaced.
+- **Track upload with MusicBrainz matching** — `needlectl import tracks` uploads
+  audio files to DroppedNeedle's drop import and then matches the entries the
+  server could not identify itself to a MusicBrainz release or release group, so a
+  release URL is enough instead of pasting ids into the web UI.
 - **`login` command** that stores credentials in `~/.needlectl.conf` (written
   `0600`).
 - **Clean, informative output** with coloured progress and a summary; `--dry-run`
@@ -109,11 +113,14 @@ Flags:
 If there is no interactive terminal (for example in CI), provide
 `--server-url`/`--username` and set `NEEDLECTL_PASSWORD`.
 
-### `needlectl import <playlist.csv>`
+### `needlectl import playlist <playlist.csv>`
 
 Imports the CSV into a DroppedNeedle playlist. The playlist is found by name and
 created if it does not exist; the name defaults to the CSV file name without its
 extension.
+
+`needlectl import <playlist.csv>` (without the `playlist` word) is kept as an
+alias for this command.
 
 ```
 $ needlectl import "My Spotify Library.csv" --name Anime
@@ -162,6 +169,87 @@ Global flags (available on every command):
 | `-v, --verbose` | Print every decision while running. |
 | `--no-color` | Disable coloured output (`NO_COLOR` is also honoured). |
 | `--version` | Print the version. |
+
+### `needlectl import tracks <path>...`
+
+Uploads audio tracks to DroppedNeedle's drop import and waits for identification.
+The server always identifies the files itself first; with `--mb` the entries it
+could not identify (`needs_review`) are then matched to the given release group.
+Entries the server imported on its own are left untouched.
+
+The MusicBrainz reference accepts a **release URL**, a **release-group URL** or a
+bare **MBID**. A release URL is resolved to its release group with a single
+lookup on musicbrainz.org; a release-group reference needs no lookup at all.
+
+```
+$ needlectl import tracks ~/Downloads/"DOUBLE-DEAL (Live) - T.M.Revolution.mp3" \
+    --mb https://musicbrainz.org/release/0c641ca7-3d67-4993-81b4-e2d0c2433010
+› Resolving https://musicbrainz.org/release/0c641ca7-… in MusicBrainz
+  release group e49c0013-dc74-4fad-b100-ae4d0fe7a1ea
+› Uploading 1 file to https://music.example.com
+✓ Uploaded as job 461dafd3 from DOUBLE-DEAL (Live) - T.M.Revolution.mp3
+› Waiting for DroppedNeedle to identify the files
+  item 15  needs_review  Loose tracks (0/1 files)
+         Couldn't work out which album this is. Match it manually.
+› Matching to release group e49c0013-dc74-4fad-b100-ae4d0fe7a1ea
+✓ item 15 matched to T.M.R. LIVE REVOLUTION'15 -Strikes Back XI- · T.M.Revolution (1/1 files)
+
+✓ Matched 1 entry
+```
+
+Directories are walked recursively; hidden files and directories are skipped.
+
+Flags:
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--mb string` | – | MusicBrainz release or release-group URL/MBID to match unidentified entries against. |
+| `--wait` | `true` | Wait for identification to finish before matching. |
+| `--timeout duration` | `5m` | How long to wait for identification. |
+| `--dry-run` | `false` | Show what would be uploaded and matched without doing it. |
+
+### `needlectl import match <item-id>... | --all`
+
+Matches entries that are waiting for review, exactly like the manual match in the
+web UI. Find the ids with `needlectl import jobs --status needs_review`.
+
+```
+$ needlectl import match 15 --mb https://musicbrainz.org/release-group/e49c0013-dc74-4fad-b100-ae4d0fe7a1ea
+$ needlectl import match --all --mb https://musicbrainz.org/release/0c641ca7-3d67-4993-81b4-e2d0c2433010
+```
+
+Only entries that still await review are touched. Entries DroppedNeedle already
+imported are reported as left alone, never overwritten.
+
+Flags:
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--mb string` | – | **Required.** MusicBrainz release or release-group URL/MBID. |
+| `--all` | `false` | Match every entry that is waiting for review. |
+| `--dry-run` | `false` | Show what would be matched without doing it. |
+
+### `needlectl import jobs`
+
+Lists the drop import jobs of the signed-in user together with their entries.
+
+```
+$ needlectl import jobs --status needs_review
+
+  job:          461dafd3
+  uploaded:     DOUBLE-DEAL (Live) - T.M.Revolution.mp3
+  item 15  needs_review  Loose tracks (0/1 files)
+         Couldn't work out which album this is. Match it manually.
+
+✓ 1 job, 1 entry
+```
+
+Flags:
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--all` | `false` | List the jobs of every user instead of only yours. |
+| `--status string` | – | Only show entries with this status (for example `needs_review`). |
 
 ### `needlectl album delete <album>`
 
@@ -627,6 +715,10 @@ Endpoints used, all under `/api/v1`:
 | `GET /library/management/previews/{id}` | Staged preview state (`ready_for_confirmation`, `operation_row_revision`) |
 | `POST /library/management/previews/{id}/apply` | Apply a preview (`preview_token`, `expected_operation_row_revision`, `idempotency_key`, `confirmation`) |
 | `POST /library/management/previews/{id}/discard` | Abandon a staged preview without applying it |
+| `POST /import/uploads` | Multipart `files` → drop import job (the server identifies the files itself) |
+| `GET /import/jobs?all=` | Import jobs with their entries |
+| `GET /import/jobs/{id}` | One import job |
+| `POST /import/items/{id}/match` | `{release_group_mbid}` → bind an entry to a release group |
 
 Authentication uses `Authorization: Bearer <token>`. An entry is considered
 *linked* when it has a `library_file_id`, a `track_source_id`, or a non-empty
@@ -663,6 +755,12 @@ Authentication uses `Authorization: Bearer <token>`. An entry is considered
 > `POST /playlists/{id}/resolve-sources` only resolves entries that have both an
 > `album_id` (MusicBrainz release-group id) and a `track_number`; entries without
 > them keep their stored sources.
+>
+> `POST /import/uploads` accepts **only** the multipart `files` field: there is no
+> way to attach a MusicBrainz reference at upload time, so the server always
+> identifies the files first and matching is a second call per entry.
+> `POST /import/items/{id}/match` takes a `release_group_mbid` (not a release
+> id), which is why a release URL has to be resolved before matching.
 
 ## Development
 
@@ -688,7 +786,12 @@ main.go                      entry point (calls cmd.Execute)
 cmd/
   root.go                    root command, global flags, config loading
   login.go                   interactive login
-  import.go                  import command and summary
+  import.go                  import command group (legacy CSV alias + subcommands)
+  import_playlist.go         CSV playlist import
+  import_tracks.go           upload tracks and match them
+  import_match.go            match import entries to a MusicBrainz release
+  import_jobs.go             list import jobs and their entries
+  import_mb.go               MusicBrainz reference resolution for --mb
   album.go                   album delete + album rename commands
   track.go                   track delete + track rename commands
   tag_edit.go                shared staged tag-edit flow (preview, confirm, apply)
@@ -703,6 +806,7 @@ internal/
   tracks/                    track query resolution (unique-match only)
   relink/                    playlist relink plan + orchestration
   importer/                  pure import plan + orchestration
+  mbref/                     MusicBrainz reference parsing + release→group lookup
   output/                    coloured, structured terminal output
 ```
 
@@ -769,10 +873,16 @@ exports and `~/.needlectl.conf` private.
   not exposed as flags yet, and the server's identity gate applies to both.
 - Duration is stored but not used as a matching guard, so live/remix versions
   with very similar titles could be linked to the wrong file.
+- `import tracks` and `import match` only fix entries that are still
+  `needs_review`. Entries the server imported on its own are deliberately left
+  alone: the API offers no documented way to re-match an entry that was already
+  imported, and re-matching one has not been verified, so a wrong automatic match
+  still has to be corrected in the web UI or by deleting and re-uploading.
 - The password is stored in plain text in a `0600` file; an OS keyring backend
   would remove that class of risk.
-- The commands implemented so far are `login`, `import`, `album delete`,
-  `album rename`, `track delete`, `track rename` and `playlist relink`.
+- The commands implemented so far are `login`, `import` (`playlist`, `files`,
+  `match`, `jobs`), `album delete`, `album rename`, `track delete`,
+  `track rename` and `playlist relink`.
 
 ## License
 

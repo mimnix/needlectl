@@ -38,14 +38,60 @@ func TestRootCommandRegistersSubcommands(t *testing.T) {
 	}
 }
 
-func TestImportCommandRequiresExactlyOneArgument(t *testing.T) {
+func TestImportCommandRegistersSubcommands(t *testing.T) {
+	importCmd := newImportCommand(&globalOptions{})
+
+	wanted := map[string]bool{"playlist": false, "tracks": false, "match": false, "jobs": false}
+	for _, command := range importCmd.Commands() {
+		if _, ok := wanted[command.Name()]; ok {
+			wanted[command.Name()] = true
+		}
+	}
+	for name, found := range wanted {
+		if !found {
+			t.Errorf("import command does not register %q", name)
+		}
+	}
+}
+
+func TestImportCommandWithoutArgumentsShowsHelp(t *testing.T) {
+	var out bytes.Buffer
 	root := newRootCommand()
 	root.SetArgs([]string{"import"})
+	root.SetOut(&out)
+	root.SetErr(&out)
+
+	if err := root.Execute(); err != nil {
+		t.Fatalf("import without arguments returned error: %v", err)
+	}
+
+	got := out.String()
+	for _, want := range []string{"tracks", "match", "jobs"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("help output does not mention %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestImportCommandRejectsMoreThanOnePlaylist(t *testing.T) {
+	root := newRootCommand()
+	root.SetArgs([]string{"import", "one.csv", "two.csv"})
 	root.SetOut(&bytes.Buffer{})
 	root.SetErr(&bytes.Buffer{})
 
 	if err := root.Execute(); err == nil {
-		t.Fatal("import without an argument returned nil error, want a failure")
+		t.Fatal("import with two arguments returned nil error, want a failure")
+	}
+}
+
+func TestImportPlaylistSubcommandRequiresAnArgument(t *testing.T) {
+	root := newRootCommand()
+	root.SetArgs([]string{"import", "playlist"})
+	root.SetOut(&bytes.Buffer{})
+	root.SetErr(&bytes.Buffer{})
+
+	if err := root.Execute(); err == nil {
+		t.Fatal("import playlist without an argument returned nil error, want a failure")
 	}
 }
 

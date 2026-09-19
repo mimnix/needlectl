@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 )
 
 const (
@@ -117,7 +118,26 @@ func CountLabel(n int, singular string) string {
 	if n == 1 {
 		return fmt.Sprintf("1 %s", singular)
 	}
-	return fmt.Sprintf("%d %ss", n, singular)
+	return fmt.Sprintf("%d %s", n, pluralize(singular))
+}
+
+// pluralize applies the regular English rules needlectl needs: a consonant
+// followed by "y" becomes "ies" ("entry" -> "entries"), everything else gains
+// an "s".
+func pluralize(noun string) string {
+	if strings.HasSuffix(noun, "y") && len(noun) > 1 && !isVowel(noun[len(noun)-2]) {
+		return noun[:len(noun)-1] + "ies"
+	}
+	return noun + "s"
+}
+
+// isVowel reports whether c is an ASCII vowel.
+func isVowel(c byte) bool {
+	switch c {
+	case 'a', 'e', 'i', 'o', 'u', 'A', 'E', 'I', 'O', 'U':
+		return true
+	}
+	return false
 }
 
 func (p *Printer) paint(code, text string) string {

@@ -456,24 +456,30 @@ func NewIdempotencyKey() (string, error) {
 	return fmt.Sprintf("%x-%x-%x-%x-%x", buf[0:4], buf[4:6], buf[6:8], buf[8:10], buf[10:16]), nil
 }
 
+// do sends a JSON request and returns the raw response body.
 func (c *Client) do(ctx context.Context, method, path string, body any) ([]byte, error) {
-	var reader io.Reader
-	if body != nil {
-		encoded, err := json.Marshal(body)
-		if err != nil {
-			return nil, fmt.Errorf("encode request body: %w", err)
-		}
-		reader = bytes.NewReader(encoded)
+	if body == nil {
+		return c.doReader(ctx, method, path, "", nil)
 	}
+	encoded, err := json.Marshal(body)
+	if err != nil {
+		return nil, fmt.Errorf("encode request body: %w", err)
+	}
+	return c.doReader(ctx, method, path, "application/json", bytes.NewReader(encoded))
+}
 
-	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, reader)
+// doReader sends a request with an arbitrary body and returns the raw response
+// body. Keeping the multipart upload on the same path as the JSON calls means
+// authentication, timeouts and error decoding are handled in one place.
+func (c *Client) doReader(ctx context.Context, method, path, contentType string, body io.Reader) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, body)
 	if err != nil {
 		return nil, fmt.Errorf("build request: %w", err)
 	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", c.userAgent)
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType)
 	}
 	if c.token != "" {
 		req.Header.Set("Authorization", "Bearer "+c.token)
