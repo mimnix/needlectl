@@ -2,6 +2,9 @@ package cmd
 
 import (
 	"bytes"
+	"context"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -64,19 +67,25 @@ func TestPreviewBlockerMentionsStaleReasons(t *testing.T) {
 
 func TestIdentitySummary(t *testing.T) {
 	review := "f27d3b91-3520-4d42-88e8-e9d933b8c4df"
+	hold := &api.ManagementHold{Kind: "handing_back", HandingBack: true}
 
 	got := identitySummary(api.LibraryAlbum{
-		AlbumIdentityState:   "local_only",
-		IdentificationStatus: "needs_review",
-		ReviewID:             &review,
+		IdentityState:   "local_only",
+		ManagementHold:  hold,
+		PendingReviewID: &review,
 	})
-	want := "state local_only · identification needs_review · review " + review
+	want := "state local_only · management handing_back · review " + review
 	if got != want {
 		t.Errorf("identitySummary = %q, want %q", got, want)
 	}
 
 	if got := identitySummary(api.LibraryAlbum{}); got != "" {
 		t.Errorf("identitySummary of an empty album = %q, want empty", got)
+	}
+
+	// A hold without a kind says nothing useful and must not render a blank part.
+	if got := identitySummary(api.LibraryAlbum{ManagementHold: &api.ManagementHold{HandingBack: true}}); got != "" {
+		t.Errorf("identitySummary of a kindless hold = %q, want empty", got)
 	}
 }
 
@@ -85,16 +94,16 @@ func TestRenameRefusedErrorExplainsTheIdentityGate(t *testing.T) {
 	review := "f27d3b91-3520-4d42-88e8-e9d933b8c4df"
 	editor := &api.TagEditor{IdentityReason: &reason}
 	detail := &api.LibraryAlbum{
-		AlbumIdentityState:   "local_only",
-		IdentificationStatus: "needs_review",
-		ReviewID:             &review,
+		IdentityState:   "local_only",
+		ManagementHold:  &api.ManagementHold{Kind: "handing_back"},
+		PendingReviewID: &review,
 	}
 
 	err := renameRefusedError("album 楽園 — Fujifabric", editor, detail)
 	if err == nil {
 		t.Fatal("renameRefusedError returned nil")
 	}
-	for _, want := range []string{"album 楽園 — Fujifabric", "IDENTITY_NOT_ACCEPTED", "local_only", "needs_review", review, "resolve the album's identity"} {
+	for _, want := range []string{"album 楽園 — Fujifabric", "IDENTITY_NOT_ACCEPTED", "local_only", "handing_back", review, "resolve the album's identity"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error %q does not mention %q", err, want)
 		}
@@ -155,5 +164,84 @@ func TestConfirmTagRenameRefusesWithoutATerminal(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "refusing to rename") {
 		t.Errorf("confirmTagRename error = %v, want the non-interactive refusal", err)
+	}
+}
+
+func TestWaitForManagementPreviewPollsUntilReady(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if r.URL.Path != "/api/v3/library/management/previews/job-1" {
+			t.Errorf("path = %q", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if requests <= 2 {
+			_, _ = w.Write([]byte(`{"job_id":"job-1","state":"queued"}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"job_id":"job-1","state":"ready","ready_for_confirmation":true,"operation_row_revision":7}`))
+	}))
+	defer server.Close()
+
+	client, err := api.New(server.URL, false)
+	if err != nil {
+		t.Fatalf("api.New returned error: %v", err)
+	}
+
+	preview, err := waitForManagementPreview(context.Background(), client, "job-1",
+		&api.ManagementPreview{JobID: "job-1", State: "queued"})
+	if err != nil {
+		t.Fatalf("waitForManagementPreview returned error: %v", err)
+	}
+	if preview.State != "ready" || !preview.ReadyForConfirmation {
+		t.Errorf("preview = %+v, want the ready state", preview)
+	}
+	if requests != 3 {
+		t.Errorf("polled the server %d times, want 3", requests)
+	}
+	if err := previewBlocker(preview); err != nil {
+		t.Errorf("the polled preview reported a blocker: %v", err)
+	}
+}
+
+func TestWaitForManagementPreviewReturnsAReadyPreviewImmediately(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		t.Error("a ready preview must not be polled again")
+	}))
+	defer server.Close()
+
+	client, err := api.New(server.URL, false)
+	if err != nil {
+		t.Fatalf("api.New returned error: %v", err)
+	}
+
+	ready := &api.ManagementPreview{
+		State: "succeeded", ReadyForConfirmation: true, OperationRowRevision: []byte("7"),
+	}
+	preview, err := waitForManagementPreview(context.Background(), client, "job-1", ready)
+	if err != nil {
+		t.Fatalf("waitForManagementPreview returned error: %v", err)
+	}
+	if preview != ready {
+		t.Errorf("preview = %+v, want the one passed in", preview)
+	}
+}
+
+func TestWaitForManagementPreviewReturnsTerminalStatesForTheBlocker(t *testing.T) {
+	client, err := api.New("http://localhost:1234", false)
+	if err != nil {
+		t.Fatalf("api.New returned error: %v", err)
+	}
+
+	preview, err := waitForManagementPreview(context.Background(), client, "job-1",
+		&api.ManagementPreview{State: "validating"})
+	if err != nil {
+		t.Fatalf("waitForManagementPreview returned error: %v", err)
+	}
+	if preview.State != "validating" {
+		t.Errorf("state = %q, want validating", preview.State)
+	}
+	if err := previewBlocker(preview); err == nil {
+		t.Error("a validating preview should still be blocked")
 	}
 }

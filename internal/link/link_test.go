@@ -77,7 +77,7 @@ func TestInputOmitsEmptyLibraryFields(t *testing.T) {
 func TestCoverURLBuildsTheReleaseGroupLink(t *testing.T) {
 	library := matcher.Track{ID: "file-1", AlbumID: "cd98137e-68eb-57c4-9c76-7e875d3a0f03", CoverAvailable: true}
 
-	if got, want := CoverURL(library), "/api/v1/covers/release-group/cd98137e-68eb-57c4-9c76-7e875d3a0f03?size=250"; got != want {
+	if got, want := CoverURL(library), "/api/v3/covers/release-group/cd98137e-68eb-57c4-9c76-7e875d3a0f03?size=250"; got != want {
 		t.Errorf("CoverURL = %q, want %q", got, want)
 	}
 }
@@ -99,7 +99,7 @@ func TestInputCarriesTheCoverURLWhenTheAlbumHasOne(t *testing.T) {
 		ID: "file-1", AlbumID: "rg-1", CoverAvailable: true,
 	})
 
-	assertStringPointer(t, "CoverURL", input.CoverURL, "/api/v1/covers/release-group/rg-1?size=250")
+	assertStringPointer(t, "CoverURL", input.CoverURL, "/api/v3/covers/release-group/rg-1?size=250")
 }
 
 func TestIndexCarriesCoverAvailability(t *testing.T) {

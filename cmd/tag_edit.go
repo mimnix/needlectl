@@ -2,11 +2,14 @@ package cmd
 
 import (
 	"bufio"
+	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/mimmo/needlectl/internal/api"
 	"github.com/mimmo/needlectl/internal/output"
@@ -93,13 +96,17 @@ func editTagField(cmd *cobra.Command, printer *output.Printer, client *api.Clien
 	if err != nil {
 		return fmt.Errorf("read staged preview: %w", err)
 	}
+	preview, err = waitForManagementPreview(cmd.Context(), client, ref.JobID, preview)
+	if err != nil {
+		return err
+	}
 	if blocker := previewBlocker(preview); blocker != nil {
-		discardPreview(cmd, client, printer, ref.JobID)
+		discardPreview(cmd, client, printer, ref.JobID, preview)
 		return blocker
 	}
 
 	if dryRun {
-		discardPreview(cmd, client, printer, ref.JobID)
+		discardPreview(cmd, client, printer, ref.JobID, preview)
 		printer.Raw("")
 		printer.Success("Dry run complete — the preview was discarded and nothing was applied")
 		return nil
@@ -111,7 +118,7 @@ func editTagField(cmd *cobra.Command, printer *output.Printer, client *api.Clien
 			return err
 		}
 		if !confirmed {
-			discardPreview(cmd, client, printer, ref.JobID)
+			discardPreview(cmd, client, printer, ref.JobID, preview)
 			printer.Warn("aborted — nothing was renamed")
 			return nil
 		}
@@ -156,6 +163,45 @@ func tagEditMode(flag string) (string, error) {
 		return api.TagEditModeWriteOnce, nil
 	default:
 		return "", fmt.Errorf("unknown mode %q (use %s or %s)", flag, renameModeSaveOverride, renameModeWriteOnce)
+	}
+}
+
+// previewWaitTimeout bounds how long a staged preview may take to become
+// confirmable. DroppedNeedle v3 stages previews asynchronously, so a fresh
+// preview is usually "queued" or "running" for a moment.
+const previewWaitTimeout = 60 * time.Second
+
+// waitForManagementPreview polls a staged preview until it is ready to confirm
+// or reached a terminal state the caller can report.
+func waitForManagementPreview(ctx context.Context, client *api.Client, jobID string, preview *api.ManagementPreview) (*api.ManagementPreview, error) {
+	deadline := time.Now().Add(previewWaitTimeout)
+	for {
+		if preview == nil {
+			return nil, errors.New("the server did not return the staged preview")
+		}
+		switch preview.State {
+		case "queued", "running", "paused":
+			// Still staging: keep waiting.
+		default:
+			return preview, nil
+		}
+		if preview.ReadyForConfirmation || preview.Expired || preview.Stale {
+			return preview, nil
+		}
+		if time.Now().After(deadline) {
+			return nil, fmt.Errorf("the staged preview did not become ready within %s (state %s)", previewWaitTimeout, preview.State)
+		}
+
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(500 * time.Millisecond):
+		}
+		next, err := client.GetManagementPreview(ctx, jobID)
+		if err != nil {
+			return nil, fmt.Errorf("read staged preview: %w", err)
+		}
+		preview = next
 	}
 }
 
@@ -208,14 +254,14 @@ func renameRefusedError(subject string, editor *api.TagEditor, detail *api.Libra
 // identitySummary renders the album identity fields that explain a refusal.
 func identitySummary(album api.LibraryAlbum) string {
 	parts := make([]string, 0, 3)
-	if album.AlbumIdentityState != "" {
-		parts = append(parts, "state "+album.AlbumIdentityState)
+	if album.IdentityState != "" {
+		parts = append(parts, "state "+album.IdentityState)
 	}
-	if album.IdentificationStatus != "" {
-		parts = append(parts, "identification "+album.IdentificationStatus)
+	if album.ManagementHold != nil && strings.TrimSpace(album.ManagementHold.Kind) != "" {
+		parts = append(parts, "management "+strings.TrimSpace(album.ManagementHold.Kind))
 	}
-	if album.ReviewID != nil && strings.TrimSpace(*album.ReviewID) != "" {
-		parts = append(parts, "review "+strings.TrimSpace(*album.ReviewID))
+	if album.PendingReviewID != nil && strings.TrimSpace(*album.PendingReviewID) != "" {
+		parts = append(parts, "review "+strings.TrimSpace(*album.PendingReviewID))
 	}
 	return strings.Join(parts, " · ")
 }
@@ -234,8 +280,12 @@ func printTagRenamePreview(printer *output.Printer, rename tagRename, ref *api.P
 	}
 }
 
-func discardPreview(cmd *cobra.Command, client *api.Client, printer *output.Printer, jobID string) {
-	if err := client.DiscardManagementPreview(cmd.Context(), jobID); err != nil {
+func discardPreview(cmd *cobra.Command, client *api.Client, printer *output.Printer, jobID string, preview *api.ManagementPreview) {
+	revision := json.RawMessage(nil)
+	if preview != nil {
+		revision = preview.OperationRowRevision
+	}
+	if err := client.DiscardManagementPreview(cmd.Context(), jobID, revision); err != nil {
 		printer.Warn("could not discard the preview job %s: %v", jobID, err)
 	}
 }

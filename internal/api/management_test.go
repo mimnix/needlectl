@@ -10,11 +10,17 @@ import (
 )
 
 func TestListAlbumTracksReadsTheAlbumTracksEndpoint(t *testing.T) {
-	var gotPath string
+	var (
+		gotPath string
+		offsets []string
+		limits  []string
+	)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
-		writeJSON(t, w, libraryTracksResponse{
-			Items:  []LibraryTrack{{ID: "t-1", Title: "Disorder"}},
+		offsets = append(offsets, r.URL.Query().Get("offset"))
+		limits = append(limits, r.URL.Query().Get("limit"))
+		writeJSON(t, w, albumTracksResponse{
+			Items:  []LibraryTrack{{ID: "t-1", Title: "Disorder", RowRevision: 4}},
 			Total:  1,
 			Offset: 0,
 			Limit:  libraryPageSize,
@@ -31,17 +37,23 @@ func TestListAlbumTracksReadsTheAlbumTracksEndpoint(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListAlbumTracks returned error: %v", err)
 	}
-	if gotPath != "/api/v1/library/albums/a-1/tracks" {
+	if gotPath != "/api/v3/library/albums/a-1/tracks" {
 		t.Errorf("path = %q", gotPath)
+	}
+	if len(offsets) != 1 || offsets[0] != "0" || limits[0] != "200" {
+		t.Errorf("offset/limit = %v/%v, want 0/200", offsets, limits)
 	}
 	if len(tracks) != 1 || tracks[0].ID != "t-1" {
 		t.Errorf("tracks = %+v", tracks)
+	}
+	if tracks[0].RowRevision != 4 {
+		t.Errorf("RowRevision = %d, want 4", tracks[0].RowRevision)
 	}
 }
 
 func TestGetTagEditorAndFieldLookup(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/v1/library/management/tracks/t-1/tag-editor" {
+		if r.URL.Path != "/api/v3/library/management/tracks/t-1/tag-editor" {
 			t.Errorf("unexpected path %q", r.URL.Path)
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -119,7 +131,7 @@ func TestCreateTagEditPreviewSendsTheEdit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateTagEditPreview returned error: %v", err)
 	}
-	if path != "/api/v1/library/management/tag-edit-previews" {
+	if path != "/api/v3/library/management/tag-edit-previews" {
 		t.Errorf("path = %q", path)
 	}
 	if ref.JobID != "job-1" || ref.PreviewToken != "tok-1" {
@@ -161,12 +173,12 @@ func TestCreateTagEditPreviewOmitsTheValueWhenResetting(t *testing.T) {
 
 func TestGetManagementPreviewKeepsTheRawRevision(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/v1/library/management/previews/job-1" {
+		if r.URL.Path != "/api/v3/library/management/previews/job-1" {
 			t.Errorf("unexpected path %q", r.URL.Path)
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{
-			"id": "job-1", "state": "ready", "stale": false, "expired": false,
+			"job_id": "job-1", "state": "ready", "stale": false, "expired": false,
 			"ready_for_confirmation": true, "operation_row_revision": 7
 		}`))
 	}))
@@ -183,6 +195,9 @@ func TestGetManagementPreviewKeepsTheRawRevision(t *testing.T) {
 	}
 	if !preview.ReadyForConfirmation || preview.State != "ready" {
 		t.Errorf("preview = %+v", preview)
+	}
+	if preview.JobID != "job-1" {
+		t.Errorf("JobID = %q, want job-1", preview.JobID)
 	}
 	if string(preview.OperationRowRevision) != "7" {
 		t.Errorf("operation_row_revision = %q, want the raw 7", preview.OperationRowRevision)
@@ -213,7 +228,7 @@ func TestApplyManagementPreviewEchoesTheRevision(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ApplyManagementPreview returned error: %v", err)
 	}
-	if path != "/api/v1/library/management/previews/job-1/apply" {
+	if path != "/api/v3/library/management/previews/job-1/apply" {
 		t.Errorf("path = %q", path)
 	}
 	if operation.ID != "op-1" {
@@ -227,10 +242,17 @@ func TestApplyManagementPreviewEchoesTheRevision(t *testing.T) {
 	}
 }
 
-func TestDiscardManagementPreview(t *testing.T) {
-	var method, path string
+func TestDiscardManagementPreviewSendsTheRevision(t *testing.T) {
+	var (
+		method string
+		path   string
+		body   map[string]any
+	)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		method, path = r.Method, r.URL.Path
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode discard body: %v", err)
+		}
 		writeJSON(t, w, map[string]string{"status": "ok"})
 	}))
 	defer server.Close()
@@ -240,11 +262,37 @@ func TestDiscardManagementPreview(t *testing.T) {
 		t.Fatalf("New returned error: %v", err)
 	}
 
-	if err := client.DiscardManagementPreview(context.Background(), "job-1"); err != nil {
+	if err := client.DiscardManagementPreview(context.Background(), "job-1", json.RawMessage("7")); err != nil {
 		t.Fatalf("DiscardManagementPreview returned error: %v", err)
 	}
-	if method != http.MethodPost || path != "/api/v1/library/management/previews/job-1/discard" {
+	if method != http.MethodPost || path != "/api/v3/library/management/previews/job-1/discard" {
 		t.Errorf("%s %s", method, path)
+	}
+	if body["expected_operation_row_revision"] != float64(7) {
+		t.Errorf("expected_operation_row_revision = %#v, want 7", body["expected_operation_row_revision"])
+	}
+}
+
+func TestDiscardManagementPreviewDefaultsTheRevisionToZero(t *testing.T) {
+	var body map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode discard body: %v", err)
+		}
+		writeJSON(t, w, map[string]string{"status": "ok"})
+	}))
+	defer server.Close()
+
+	client, err := New(server.URL, false)
+	if err != nil {
+		t.Fatalf("New returned error: %v", err)
+	}
+
+	if err := client.DiscardManagementPreview(context.Background(), "job-1", nil); err != nil {
+		t.Fatalf("DiscardManagementPreview returned error: %v", err)
+	}
+	if body["expected_operation_row_revision"] != float64(0) {
+		t.Errorf("expected_operation_row_revision = %#v, want 0", body["expected_operation_row_revision"])
 	}
 }
 

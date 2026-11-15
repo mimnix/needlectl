@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -16,6 +15,7 @@ import (
 func TestUploadImportFilesSendsMultipartFiles(t *testing.T) {
 	var (
 		method        string
+		path          string
 		authorization string
 		names         []string
 		contents      map[string]string
@@ -23,6 +23,7 @@ func TestUploadImportFilesSendsMultipartFiles(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		method = r.Method
+		path = r.URL.Path
 		authorization = r.Header.Get("Authorization")
 		if err := r.ParseMultipartForm(1 << 20); err != nil {
 			t.Errorf("request is not multipart: %v", err)
@@ -73,6 +74,9 @@ func TestUploadImportFilesSendsMultipartFiles(t *testing.T) {
 
 	if method != http.MethodPost {
 		t.Errorf("method = %q, want POST", method)
+	}
+	if path != "/api/v3/import/uploads" {
+		t.Errorf("path = %q, want /api/v3/import/uploads", path)
 	}
 	if authorization != "Bearer tok-1" {
 		t.Errorf("Authorization = %q, want Bearer tok-1", authorization)
@@ -146,9 +150,13 @@ func TestUploadImportFilesReportsMissingFiles(t *testing.T) {
 }
 
 func TestListImportJobsRequestsEveryUserWhenAsked(t *testing.T) {
-	var query string
+	var (
+		query string
+		path  string
+	)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		query = r.URL.RawQuery
+		path = r.URL.Path
 		writeJSON(t, w, map[string]any{
 			"jobs": []ImportJob{{ID: "job-1", Status: "completed", UploadName: "a.mp3"}},
 		})
@@ -167,6 +175,9 @@ func TestListImportJobsRequestsEveryUserWhenAsked(t *testing.T) {
 	if len(jobs) != 1 || jobs[0].ID != "job-1" {
 		t.Errorf("jobs = %+v, want job-1", jobs)
 	}
+	if path != "/api/v3/import/jobs" {
+		t.Errorf("path = %q, want /api/v3/import/jobs", path)
+	}
 	if !strings.Contains(query, "all=true") {
 		t.Errorf("query = %q, want all=true", query)
 	}
@@ -179,25 +190,31 @@ func TestListImportJobsRequestsEveryUserWhenAsked(t *testing.T) {
 	}
 }
 
-func TestGetImportJobReturnsItems(t *testing.T) {
+func TestGetImportJobFindsTheJobInTheRecentListing(t *testing.T) {
+	var requestPath, requestQuery string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/v1/import/jobs/job-9" {
-			t.Errorf("path = %q, want /api/v1/import/jobs/job-9", r.URL.Path)
-		}
-		writeJSON(t, w, ImportJob{
-			ID:         "job-9",
-			Status:     "completed",
-			UploadName: "album",
-			Items: []ImportItem{{
-				ID:               15,
-				Status:           ImportStatusNeedsReview,
-				FolderName:       "Loose tracks",
-				AlbumTitle:       nil,
-				FilesTotal:       1,
-				FilesImported:    0,
-				Detail:           strPtr("Couldn't work out which album this is."),
-				ReleaseGroupMBID: nil,
-			}},
+		requestPath = r.URL.Path
+		requestQuery = r.URL.RawQuery
+		writeJSON(t, w, map[string]any{
+			"jobs": []ImportJob{
+				{ID: "job-8", Status: "completed", UploadName: "other"},
+				{
+					ID:         "job-9",
+					Status:     "completed",
+					UploadName: "album",
+					Items: []ImportItem{{
+						ID:               15,
+						Status:           ImportStatusNeedsReview,
+						FolderName:       "Loose tracks",
+						AlbumTitle:       nil,
+						FilesTotal:       1,
+						FilesImported:    0,
+						Detail:           strPtr("Couldn't work out which album this is."),
+						ReasonCode:       strPtr("no_release_group_match"),
+						ReleaseGroupMBID: nil,
+					}},
+				},
+			},
 		})
 	}))
 	defer server.Close()
@@ -211,8 +228,17 @@ func TestGetImportJobReturnsItems(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetImportJob returned error: %v", err)
 	}
+	if requestPath != "/api/v3/import/jobs" {
+		t.Errorf("path = %q, want /api/v3/import/jobs", requestPath)
+	}
+	if requestQuery != "" {
+		t.Errorf("query = %q, want no all parameter", requestQuery)
+	}
 	if job.UploadName != "album" || len(job.Items) != 1 {
 		t.Fatalf("job = %+v, want one item", job)
+	}
+	if job.Items[0].ReasonCode == nil || *job.Items[0].ReasonCode != "no_release_group_match" {
+		t.Errorf("ReasonCode = %v", job.Items[0].ReasonCode)
 	}
 	if !job.Settled() {
 		t.Error("items that reached needs_review are final, so the job should count as settled")
@@ -228,13 +254,37 @@ func TestGetImportJobReturnsItems(t *testing.T) {
 	}
 }
 
-func TestGetImportJobRejectsEmptyID(t *testing.T) {
+func TestGetImportJobRejectsAJobOutsideTheRecentListing(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(t, w, map[string]any{
+			"jobs": []ImportJob{{ID: "job-1", Status: "completed"}},
+		})
+	}))
+	defer server.Close()
+
+	client, err := New(server.URL, false)
+	if err != nil {
+		t.Fatalf("New returned error: %v", err)
+	}
+
+	_, err = client.GetImportJob(context.Background(), "job-9")
+	if err == nil {
+		t.Fatal("GetImportJob returned nil error, want a failure")
+	}
+	if !strings.Contains(err.Error(), "not in the recent jobs list") {
+		t.Errorf("error = %q, want it to point at the recent jobs list", err)
+	}
+}
+
+func TestGetImportJobRejectsAnEmptyID(t *testing.T) {
 	client, err := New("http://localhost:1234", false)
 	if err != nil {
 		t.Fatalf("New returned error: %v", err)
 	}
-	if _, err := client.GetImportJob(context.Background(), "  "); err == nil {
-		t.Fatal("GetImportJob returned nil error, want a failure")
+	for _, id := range []string{"", "   ", "\t\n"} {
+		if _, err := client.GetImportJob(context.Background(), id); err == nil {
+			t.Errorf("GetImportJob(%q) returned nil error, want a failure", id)
+		}
 	}
 }
 
@@ -246,103 +296,42 @@ func TestImportJobWithNoItemsIsNotSettled(t *testing.T) {
 	}
 }
 
-func TestMatchImportItemSendsTheReleaseGroup(t *testing.T) {
-	const group = "e49c0013-dc74-4fad-b100-ae4d0fe7a1ea"
-
-	var (
-		method string
-		path   string
-		body   map[string]any
-	)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		method = r.Method
-		path = r.URL.Path
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			t.Errorf("decode body: %v", err)
+func TestImportItemSettled(t *testing.T) {
+	cases := map[string]bool{
+		ImportStatusProcessing:  false,
+		ImportStatusImported:    true,
+		ImportStatusSkipped:     true,
+		ImportStatusNeedsReview: true,
+		ImportStatusFailed:      true,
+		ImportStatusDiscarded:   true,
+		"unknown_status":        false,
+	}
+	for status, want := range cases {
+		if got := (ImportItem{Status: status}).Settled(); got != want {
+			t.Errorf("Settled(%q) = %v, want %v", status, got, want)
 		}
-		writeJSON(t, w, ImportItem{
-			ID:               15,
-			Status:           ImportStatusImported,
-			AlbumTitle:       strPtr("T.M.R. LIVE REVOLUTION'15 -Strikes Back XI-"),
-			ArtistName:       strPtr("T.M.Revolution"),
-			ReleaseGroupMBID: strPtr(group),
-			FilesTotal:       1,
-			FilesImported:    1,
-			Detail:           strPtr("Imported 1, covers 1 of 12 album tracks"),
-		})
-	}))
-	defer server.Close()
-
-	client, err := New(server.URL, false)
-	if err != nil {
-		t.Fatalf("New returned error: %v", err)
-	}
-
-	item, err := client.MatchImportItem(context.Background(), 15, group)
-	if err != nil {
-		t.Fatalf("MatchImportItem returned error: %v", err)
-	}
-
-	if method != http.MethodPost {
-		t.Errorf("method = %q, want POST", method)
-	}
-	if path != "/api/v1/import/items/15/match" {
-		t.Errorf("path = %q, want /api/v1/import/items/15/match", path)
-	}
-	if body["release_group_mbid"] != group {
-		t.Errorf("body = %v, want release_group_mbid %s", body, group)
-	}
-	if item.Status != ImportStatusImported || item.Title() == "" {
-		t.Errorf("item = %+v, want an imported item with a title", item)
 	}
 }
 
-func TestMatchImportItemRejectsInvalidInput(t *testing.T) {
-	client, err := New("http://localhost:1234", false)
-	if err != nil {
-		t.Fatalf("New returned error: %v", err)
+func TestImportItemReadsReasonFields(t *testing.T) {
+	raw := `{"id":15,"status":"failed","reason_code":"no_audio_files","reason_action":"pick_another_folder"}`
+	var item ImportItem
+	if err := json.Unmarshal([]byte(raw), &item); err != nil {
+		t.Fatalf("unmarshal failed: %v", err)
+	}
+	if item.ReasonCode == nil || *item.ReasonCode != "no_audio_files" {
+		t.Errorf("ReasonCode = %v", item.ReasonCode)
+	}
+	if item.ReasonAction == nil || *item.ReasonAction != "pick_another_folder" {
+		t.Errorf("ReasonAction = %v", item.ReasonAction)
 	}
 
-	cases := []struct {
-		name    string
-		itemID  int
-		groupID string
-	}{
-		{"zero item", 0, "e49c0013-dc74-4fad-b100-ae4d0fe7a1ea"},
-		{"negative item", -1, "e49c0013-dc74-4fad-b100-ae4d0fe7a1ea"},
-		{"empty group", 15, "   "},
+	var withoutReason ImportItem
+	if err := json.Unmarshal([]byte(`{"id":16,"status":"imported","reason_code":null,"reason_action":null}`), &withoutReason); err != nil {
+		t.Fatalf("unmarshal failed: %v", err)
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if _, err := client.MatchImportItem(context.Background(), tc.itemID, tc.groupID); err == nil {
-				t.Fatal("MatchImportItem returned nil error, want a failure")
-			}
-		})
-	}
-}
-
-func TestMatchImportItemSurfacesServerErrors(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusConflict)
-		_, _ = w.Write([]byte(`{"detail":"item was already imported"}`))
-	}))
-	defer server.Close()
-
-	client, err := New(server.URL, false)
-	if err != nil {
-		t.Fatalf("New returned error: %v", err)
-	}
-
-	_, err = client.MatchImportItem(context.Background(), 13, "e49c0013-dc74-4fad-b100-ae4d0fe7a1ea")
-	if err == nil {
-		t.Fatal("MatchImportItem returned nil error, want a failure")
-	}
-	var apiErr *Error
-	if !errors.As(err, &apiErr) {
-		t.Fatalf("error = %v, want an *api.Error", err)
-	}
-	if apiErr.StatusCode != http.StatusConflict || apiErr.Detail != "item was already imported" {
-		t.Errorf("error = %+v, want the decoded conflict detail", apiErr)
+	if withoutReason.ReasonCode != nil || withoutReason.ReasonAction != nil {
+		t.Errorf("reason fields = %v/%v, want nil", withoutReason.ReasonCode, withoutReason.ReasonAction)
 	}
 }
 

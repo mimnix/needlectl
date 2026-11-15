@@ -122,10 +122,12 @@ func TestToTrackCopiesFields(t *testing.T) {
 	got := toTrack(api.LibraryTrack{
 		ID: "track-1", Title: "Disorder", ArtistName: "神崎エルザ", AlbumTitle: "Elza",
 		TrackNumber: 4, DiscNumber: 1, DurationSeconds: 215, Format: "FLAC",
+		RowRevision: 23,
 	})
 	want := tracks.Track{
 		ID: "track-1", Title: "Disorder", ArtistName: "神崎エルザ", AlbumName: "Elza",
 		TrackNumber: 4, DiscNumber: 1, DurationSeconds: 215, Format: "FLAC",
+		Revision: 23,
 	}
 	if got != want {
 		t.Errorf("toTrack = %+v, want %+v", got, want)

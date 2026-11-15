@@ -11,7 +11,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 )
 
@@ -28,8 +27,8 @@ type UploadFile struct {
 // job created for them.
 //
 // The endpoint accepts no MusicBrainz reference: DroppedNeedle always identifies
-// the files itself and leaves the entries it cannot resolve in the
-// "needs_review" state for MatchImportItem.
+// the files itself. Entries it cannot resolve end in the "needs_review" state,
+// which v3 exposes only in its web UI.
 func (c *Client) UploadImportFiles(ctx context.Context, files []UploadFile) (*ImportJob, error) {
 	if len(files) == 0 {
 		return nil, errors.New("no files to upload")
@@ -46,7 +45,7 @@ func (c *Client) UploadImportFiles(ctx context.Context, files []UploadFile) (*Im
 		writer.CloseWithError(writeUploadBody(multipartWriter, files))
 	}()
 
-	data, err := c.doReader(ctx, http.MethodPost, "/api/v1/import/uploads", contentType, reader)
+	data, err := c.doReader(ctx, http.MethodPost, "/api/v3/import/uploads", contentType, reader)
 	if err != nil {
 		return nil, err
 	}
@@ -64,7 +63,7 @@ func (c *Client) UploadImportFiles(ctx context.Context, files []UploadFile) (*Im
 // ListImportJobs returns the drop import jobs of the authenticated user. When
 // all is true it returns the jobs of every user instead.
 func (c *Client) ListImportJobs(ctx context.Context, all bool) ([]ImportJob, error) {
-	path := "/api/v1/import/jobs"
+	path := "/api/v3/import/jobs"
 	if all {
 		path += "?" + url.Values{"all": {"true"}}.Encode()
 	}
@@ -81,50 +80,25 @@ func (c *Client) ListImportJobs(ctx context.Context, all bool) ([]ImportJob, err
 }
 
 // GetImportJob returns one import job together with its items.
+//
+// DroppedNeedle v3 has no single-job endpoint: the job listing carries the full
+// items, so the job is looked up there.
 func (c *Client) GetImportJob(ctx context.Context, jobID string) (*ImportJob, error) {
 	trimmed := strings.TrimSpace(jobID)
 	if trimmed == "" {
 		return nil, errors.New("import job id is empty")
 	}
 
-	path := "/api/v1/import/jobs/" + url.PathEscape(trimmed)
-	data, err := c.do(ctx, http.MethodGet, path, nil)
+	jobs, err := c.ListImportJobs(ctx, false)
 	if err != nil {
 		return nil, err
 	}
-	var job ImportJob
-	if err := json.Unmarshal(data, &job); err != nil {
-		return nil, fmt.Errorf("decode import job: %w", err)
+	for i := range jobs {
+		if jobs[i].ID == trimmed {
+			return &jobs[i], nil
+		}
 	}
-	return &job, nil
-}
-
-// MatchImportItem binds one import item to a MusicBrainz release group and
-// returns the updated item.
-//
-// The endpoint takes a release group, not a release, so a release URL has to be
-// resolved first (see internal/mbref).
-func (c *Client) MatchImportItem(ctx context.Context, itemID int, releaseGroupMBID string) (*ImportItem, error) {
-	if itemID <= 0 {
-		return nil, fmt.Errorf("invalid import item id %d", itemID)
-	}
-	trimmed := strings.TrimSpace(releaseGroupMBID)
-	if trimmed == "" {
-		return nil, errors.New("release group mbid is empty")
-	}
-
-	path := "/api/v1/import/items/" + strconv.Itoa(itemID) + "/match"
-	body := map[string]string{"release_group_mbid": trimmed}
-	data, err := c.do(ctx, http.MethodPost, path, body)
-	if err != nil {
-		return nil, err
-	}
-
-	var item ImportItem
-	if err := json.Unmarshal(data, &item); err != nil {
-		return nil, fmt.Errorf("decode matched import item: %w", err)
-	}
-	return &item, nil
+	return nil, fmt.Errorf("import job %s is not in the recent jobs list", trimmed)
 }
 
 // validateUploadFiles fails before any request is made when a file cannot be

@@ -148,12 +148,9 @@ func runTrackDelete(cmd *cobra.Command, opts *globalOptions, input trackDeleteOp
 	}
 
 	printer.Step("Deleting track %s", trackLabel(target))
-	removal, err := client.DeleteTrack(cmd.Context(), target.ID)
+	removal, err := client.DeleteTrack(cmd.Context(), target.ID, target.Revision)
 	if err != nil {
 		return fmt.Errorf("delete track: %w", err)
-	}
-	if removal != nil && !removal.Success {
-		return errors.New("the server reported that the track was not deleted")
 	}
 
 	removed := 0
@@ -337,6 +334,7 @@ func toTrack(track api.LibraryTrack) tracks.Track {
 		DiscNumber:      track.DiscNumber,
 		DurationSeconds: track.DurationSeconds,
 		Format:          track.Format,
+		Revision:        track.RowRevision,
 	}
 }
 

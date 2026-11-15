@@ -22,8 +22,8 @@ func newImportJobsCommand(opts *globalOptions) *cobra.Command {
 		Short: "List import jobs and their entries",
 		Long: `List the drop import jobs of the signed-in user.
 
-Entries DroppedNeedle could not identify are shown as "needs_review"; those are
-the ones "needlectl import match" can still fix.`,
+Entries DroppedNeedle could not identify are shown as "needs_review". DroppedNeedle
+v3 has no API to resolve them, so they have to be decided in its web UI.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runImportJobs(cmd, opts, input)
@@ -153,4 +153,13 @@ func countImportItems(jobs []api.ImportJob, status string) int {
 		total += len(filterImportItems(job.Items, status))
 	}
 	return total
+}
+
+// statusSuffix renders the " with status X" part of the empty-result message.
+func statusSuffix(status string) string {
+	trimmed := strings.TrimSpace(status)
+	if trimmed == "" {
+		return ""
+	}
+	return " with status " + trimmed
 }

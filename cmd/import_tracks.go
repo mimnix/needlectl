@@ -17,7 +17,6 @@ import (
 )
 
 type importTracksOptions struct {
-	mb      string
 	wait    bool
 	timeout time.Duration
 	dryRun  bool
@@ -28,17 +27,12 @@ func newImportTracksCommand(opts *globalOptions) *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "tracks <path>...",
-		Short: "Upload tracks and match them to a MusicBrainz release",
+		Short: "Upload tracks to DroppedNeedle's drop import",
 		Long: `Upload audio tracks to DroppedNeedle's drop import.
 
-DroppedNeedle always identifies the files itself first. With --mb, the entries it
-could not identify ("needs_review") are then matched to the given release group.
-Entries DroppedNeedle imported on its own are left untouched: only the server can
-tell whether such an entry can still be re-matched, which is why the automatic
-match is never overwritten here.
-
-The reference accepts a MusicBrainz release URL, a release-group URL or a bare
-MBID. A release URL is resolved to its release group first.
+DroppedNeedle identifies the files itself and reports how each group ended up.
+Entries it cannot identify are left in the "needs_review" state; DroppedNeedle v3
+dropped the API for resolving them, so they have to be decided in its web UI.
 
 Directories are walked recursively; hidden files and directories are skipped.`,
 		Args: cobra.MinimumNArgs(1),
@@ -47,10 +41,9 @@ Directories are walked recursively; hidden files and directories are skipped.`,
 		},
 	}
 
-	cmd.Flags().StringVar(&input.mb, "mb", "", "MusicBrainz release or release-group URL/MBID to match unidentified entries against")
 	cmd.Flags().BoolVar(&input.wait, "wait", true, "wait for DroppedNeedle to finish identifying the uploaded files")
 	cmd.Flags().DurationVar(&input.timeout, "timeout", 5*time.Minute, "how long to wait for identification")
-	cmd.Flags().BoolVar(&input.dryRun, "dry-run", false, "show what would be uploaded and matched without doing it")
+	cmd.Flags().BoolVar(&input.dryRun, "dry-run", false, "show what would be uploaded without doing it")
 
 	return cmd
 }
@@ -63,16 +56,8 @@ func runImportTracks(cmd *cobra.Command, opts *globalOptions, paths []string, in
 		return err
 	}
 
-	var releaseGroup string
-	if strings.TrimSpace(input.mb) != "" {
-		releaseGroup, err = resolveReleaseGroup(cmd.Context(), printer, input.mb)
-		if err != nil {
-			return err
-		}
-	}
-
 	if input.dryRun {
-		return printImportTracksDryRun(printer, files, releaseGroup)
+		return printImportTracksDryRun(printer, files)
 	}
 
 	cfg, err := opts.loadConfig(printer)
@@ -105,34 +90,20 @@ func runImportTracks(cmd *cobra.Command, opts *globalOptions, paths []string, in
 
 	printImportItems(printer, job.Items)
 
-	if releaseGroup == "" {
-		if hasUnmatchedItems(job.Items) {
-			printer.Warn("some entries still need a manual match; re-run with --mb or use 'needlectl import match'")
-		}
-		return nil
-	}
-
-	printer.Step("Matching to release group %s", releaseGroup)
-	result := matchImportItems(cmd.Context(), printer, client, job.Items, releaseGroup, false)
-	printMatchSummary(printer, result)
-
-	if len(result.Failures) > 0 {
-		return fmt.Errorf("%s could not be matched", output.CountLabel(len(result.Failures), "entry"))
+	if needsReviewItems(job.Items) > 0 {
+		printer.Warn("%s still need review; DroppedNeedle v3 has no API to resolve them, use its web UI",
+			output.CountLabel(needsReviewItems(job.Items), "entry"))
 	}
 	return nil
 }
 
 // printImportTracksDryRun reports what an upload would send, without sending it.
-func printImportTracksDryRun(printer *output.Printer, files []api.UploadFile, releaseGroup string) error {
+func printImportTracksDryRun(printer *output.Printer, files []api.UploadFile) error {
 	printer.Step("Dry run: %s would be uploaded", output.CountLabel(len(files), "file"))
 	for _, file := range files {
 		printer.Info("%s", file.Path)
 	}
-	if releaseGroup == "" {
-		printer.Info("without --mb, unidentified entries would be left for 'needlectl import match'")
-	} else {
-		printer.Info("unidentified entries would be matched to release group %s", releaseGroup)
-	}
+	printer.Info("entries DroppedNeedle cannot identify would be left for review in its web UI")
 	printer.Success("Dry run complete — nothing was uploaded")
 	return nil
 }
@@ -207,4 +178,26 @@ func waitForImportJob(ctx context.Context, printer *output.Printer, client *api.
 		case <-time.After(2 * time.Second):
 		}
 	}
+}
+
+// needsReviewItems counts the entries that still wait for a decision.
+func needsReviewItems(items []api.ImportItem) int {
+	count := 0
+	for _, item := range items {
+		if item.NeedsReview() {
+			count++
+		}
+	}
+	return count
+}
+
+// settledLabel counts how many items already reached a final state.
+func settledLabel(items []api.ImportItem) string {
+	settled := 0
+	for _, item := range items {
+		if item.Settled() {
+			settled++
+		}
+	}
+	return fmt.Sprintf("%d of %d settled", settled, len(items))
 }

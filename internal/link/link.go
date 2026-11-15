@@ -49,7 +49,7 @@ func CoverURL(library matcher.Track) string {
 	if library.AlbumID == "" || !library.CoverAvailable {
 		return ""
 	}
-	return "/api/v1/covers/release-group/" + url.PathEscape(library.AlbumID) + "?size=" + coverSize
+	return "/api/v3/covers/release-group/" + url.PathEscape(library.AlbumID) + "?size=" + coverSize
 }
 
 // Input builds the add-tracks payload that links a playlist entry to library.

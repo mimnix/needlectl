@@ -1,5 +1,5 @@
 // Package api is a small typed client for the DroppedNeedle REST API
-// (/api/v1). Only the endpoints needlectl needs are implemented.
+// (/api/v3). Only the endpoints needlectl needs are implemented.
 package api
 
 import (
@@ -88,9 +88,12 @@ func (c *Client) BaseURL() string { return c.baseURL }
 func (c *Client) SetToken(token string) { c.token = token }
 
 // Login authenticates with username/password and stores the returned token.
+//
+// DroppedNeedle defaults to cookie sessions, which return no token. A CLI has no
+// cookie jar, so bearer transport is requested explicitly.
 func (c *Client) Login(ctx context.Context, username, password string) (*User, error) {
-	body := map[string]string{"username": username, "password": password}
-	data, err := c.do(ctx, http.MethodPost, "/api/v1/auth/login", body)
+	body := map[string]string{"username": username, "password": password, "transport": "bearer"}
+	data, err := c.do(ctx, http.MethodPost, "/api/v3/auth/login", body)
 	if err != nil {
 		return nil, err
 	}
@@ -107,7 +110,7 @@ func (c *Client) Login(ctx context.Context, username, password string) (*User, e
 
 // Me returns the authenticated user.
 func (c *Client) Me(ctx context.Context) (*User, error) {
-	data, err := c.do(ctx, http.MethodGet, "/api/v1/auth/me", nil)
+	data, err := c.do(ctx, http.MethodGet, "/api/v3/me", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -129,22 +132,26 @@ func (c *Client) SearchLibraryTracks(ctx context.Context, query string) ([]Libra
 	return c.listLibraryTracks(ctx, query)
 }
 
-// listLibraryTracks follows pagination until the reported total is reached.
+// listLibraryTracks follows the cursor pagination until the server reports no
+// next page.
 func (c *Client) listLibraryTracks(ctx context.Context, search string) ([]LibraryTrack, error) {
 	var all []LibraryTrack
-	offset := 0
+	cursor := ""
+	previous := ""
 	total := 0
 	complete := false
 
 	for page := 0; page < maxLibraryPages; page++ {
 		params := url.Values{}
 		params.Set("limit", strconv.Itoa(libraryPageSize))
-		params.Set("offset", strconv.Itoa(offset))
+		if cursor != "" {
+			params.Set("after", cursor)
+		}
 		if trimmed := strings.TrimSpace(search); trimmed != "" {
 			params.Set("q", trimmed)
 		}
 
-		data, err := c.do(ctx, http.MethodGet, "/api/v1/library/tracks?"+params.Encode(), nil)
+		data, err := c.do(ctx, http.MethodGet, "/api/v3/library/tracks?"+params.Encode(), nil)
 		if err != nil {
 			return nil, err
 		}
@@ -152,21 +159,24 @@ func (c *Client) listLibraryTracks(ctx context.Context, search string) ([]Librar
 		if err := json.Unmarshal(data, &resp); err != nil {
 			return nil, fmt.Errorf("decode library tracks: %w", err)
 		}
-		if page > 0 && resp.Offset != offset {
-			return nil, fmt.Errorf("library listing returned offset %d for requested offset %d; refusing to work from an inconsistent library", resp.Offset, offset)
-		}
 
 		total = resp.Total
 		all = append(all, resp.Items...)
+		next := ""
+		if resp.Next != nil {
+			next = strings.TrimSpace(*resp.Next)
+		}
+		if next == "" {
+			complete = true
+			break
+		}
+		if next == cursor || next == previous {
+			return nil, errors.New("library listing returned a repeated page cursor; refusing to work from an inconsistent library")
+		}
 		if len(resp.Items) == 0 {
-			complete = true
-			break
+			return nil, errors.New("library listing returned a page cursor but no items; refusing to work from an inconsistent library")
 		}
-		offset += len(resp.Items)
-		if total > 0 && offset >= total {
-			complete = true
-			break
-		}
+		previous, cursor = cursor, next
 	}
 
 	if !complete {
@@ -180,17 +190,21 @@ func (c *Client) listLibraryTracks(ctx context.Context, search string) ([]Librar
 // truncating when too many albums match.
 func (c *Client) ListLibraryAlbums(ctx context.Context, query string) ([]LibraryAlbum, error) {
 	var all []LibraryAlbum
+	cursor := ""
+	previous := ""
 	complete := false
 
-	for page := 1; page <= maxAlbumPages; page++ {
+	for page := 0; page < maxAlbumPages; page++ {
 		params := url.Values{}
-		params.Set("page", strconv.Itoa(page))
-		params.Set("page_size", strconv.Itoa(albumPageSize))
+		params.Set("limit", strconv.Itoa(albumPageSize))
+		if cursor != "" {
+			params.Set("after", cursor)
+		}
 		if trimmed := strings.TrimSpace(query); trimmed != "" {
 			params.Set("q", trimmed)
 		}
 
-		data, err := c.do(ctx, http.MethodGet, "/api/v1/library/albums?"+params.Encode(), nil)
+		data, err := c.do(ctx, http.MethodGet, "/api/v3/library/albums?"+params.Encode(), nil)
 		if err != nil {
 			return nil, err
 		}
@@ -200,10 +214,21 @@ func (c *Client) ListLibraryAlbums(ctx context.Context, query string) ([]Library
 		}
 
 		all = append(all, resp.Items...)
-		if len(resp.Items) == 0 || len(all) >= resp.Total {
+		next := ""
+		if resp.Next != nil {
+			next = strings.TrimSpace(*resp.Next)
+		}
+		if next == "" {
 			complete = true
 			break
 		}
+		if next == cursor || next == previous {
+			return nil, errors.New("album listing returned a repeated page cursor; refusing to work from an inconsistent library")
+		}
+		if len(resp.Items) == 0 {
+			return nil, errors.New("album listing returned a page cursor but no items; refusing to work from an inconsistent library")
+		}
+		previous, cursor = cursor, next
 	}
 
 	if !complete {
@@ -214,7 +239,7 @@ func (c *Client) ListLibraryAlbums(ctx context.Context, query string) ([]Library
 
 // GetLibraryAlbum returns one album of the library by its id.
 func (c *Client) GetLibraryAlbum(ctx context.Context, albumID string) (*LibraryAlbum, error) {
-	path := "/api/v1/library/albums/" + url.PathEscape(albumID)
+	path := "/api/v3/library/albums/" + url.PathEscape(albumID)
 	data, err := c.do(ctx, http.MethodGet, path, nil)
 	if err != nil {
 		return nil, err
@@ -229,17 +254,27 @@ func (c *Client) GetLibraryAlbum(ctx context.Context, albumID string) (*LibraryA
 // DeleteAlbum removes an album and cascades to its tracks. When deleteFiles is
 // true the files are also removed from disk; when stopWanted is false the album
 // stays queued for future automatic downloads.
-func (c *Client) DeleteAlbum(ctx context.Context, albumID string, deleteFiles, stopWanted bool) (*CatalogRemovalResponse, error) {
+//
+// The endpoint demands both the row and the listing revision, and the list view
+// does not carry them, so the album detail is loaded first.
+func (c *Client) DeleteAlbum(ctx context.Context, albumID string, deleteFiles, stopWanted bool) (*RemovalResponse, error) {
+	album, err := c.GetLibraryAlbum(ctx, albumID)
+	if err != nil {
+		return nil, err
+	}
+
 	params := url.Values{}
+	params.Set("expected_revision", strconv.FormatInt(album.RowRevision, 10))
+	params.Set("expected_listing_revision", strconv.FormatInt(album.ListingRevision, 10))
 	params.Set("delete_files", strconv.FormatBool(deleteFiles))
 	params.Set("stop_wanted", strconv.FormatBool(stopWanted))
 
-	path := "/api/v1/library/album/" + url.PathEscape(albumID) + "?" + params.Encode()
+	path := "/api/v3/library/albums/" + url.PathEscape(albumID) + "?" + params.Encode()
 	data, err := c.do(ctx, http.MethodDelete, path, nil)
 	if err != nil {
 		return nil, err
 	}
-	var resp CatalogRemovalResponse
+	var resp RemovalResponse
 	if err := json.Unmarshal(data, &resp); err != nil {
 		return nil, fmt.Errorf("decode album removal: %w", err)
 	}
@@ -248,24 +283,55 @@ func (c *Client) DeleteAlbum(ctx context.Context, albumID string, deleteFiles, s
 
 // DeleteTrack removes a single track from the library.
 //
-// The DroppedNeedle endpoint has no catalog-only variant: the backing file is
-// always deleted from disk.
-func (c *Client) DeleteTrack(ctx context.Context, trackID string) (*CatalogRemovalResponse, error) {
-	path := "/api/v1/library/tracks/" + url.PathEscape(trackID)
+// The file is always deleted from disk: DroppedNeedle has no catalog-only
+// variant for a single track. The endpoint requires the track's row revision,
+// which is passed in when the caller already has it; otherwise it is looked up.
+func (c *Client) DeleteTrack(ctx context.Context, trackID string, expectedRevision int64) (*RemovalResponse, error) {
+	if expectedRevision <= 0 {
+		revision, err := c.libraryTrackRevision(ctx, trackID)
+		if err != nil {
+			return nil, err
+		}
+		expectedRevision = revision
+	}
+
+	params := url.Values{}
+	params.Set("expected_revision", strconv.FormatInt(expectedRevision, 10))
+	params.Set("delete_file", "true")
+
+	path := "/api/v3/library/tracks/" + url.PathEscape(trackID) + "?" + params.Encode()
 	data, err := c.do(ctx, http.MethodDelete, path, nil)
 	if err != nil {
 		return nil, err
 	}
-	var resp CatalogRemovalResponse
+	var resp RemovalResponse
 	if err := json.Unmarshal(data, &resp); err != nil {
 		return nil, fmt.Errorf("decode track removal: %w", err)
 	}
 	return &resp, nil
 }
 
+// libraryTrackRevision finds the row revision of one track. DroppedNeedle v3 has
+// no single-track read endpoint, so the library listing is scanned.
+func (c *Client) libraryTrackRevision(ctx context.Context, trackID string) (int64, error) {
+	tracks, err := c.ListLibraryTracks(ctx)
+	if err != nil {
+		return 0, err
+	}
+	for _, track := range tracks {
+		if track.ID == trackID {
+			if track.RowRevision <= 0 {
+				return 0, fmt.Errorf("track %s has no revision to delete with", trackID)
+			}
+			return track.RowRevision, nil
+		}
+	}
+	return 0, fmt.Errorf("track %s is not in the library", trackID)
+}
+
 // ListPlaylists returns the playlists visible to the authenticated user.
 func (c *Client) ListPlaylists(ctx context.Context) ([]PlaylistSummary, error) {
-	data, err := c.do(ctx, http.MethodGet, "/api/v1/playlists", nil)
+	data, err := c.do(ctx, http.MethodGet, "/api/v3/playlists", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -278,7 +344,7 @@ func (c *Client) ListPlaylists(ctx context.Context) ([]PlaylistSummary, error) {
 
 // CreatePlaylist creates a new playlist with the given name.
 func (c *Client) CreatePlaylist(ctx context.Context, name string) (*PlaylistDetail, error) {
-	data, err := c.do(ctx, http.MethodPost, "/api/v1/playlists", map[string]string{"name": name})
+	data, err := c.do(ctx, http.MethodPost, "/api/v3/playlists", map[string]string{"name": name})
 	if err != nil {
 		return nil, err
 	}
@@ -291,7 +357,7 @@ func (c *Client) CreatePlaylist(ctx context.Context, name string) (*PlaylistDeta
 
 // GetPlaylist returns a playlist and its tracks.
 func (c *Client) GetPlaylist(ctx context.Context, id string) (*PlaylistDetail, error) {
-	data, err := c.do(ctx, http.MethodGet, "/api/v1/playlists/"+url.PathEscape(id), nil)
+	data, err := c.do(ctx, http.MethodGet, "/api/v3/playlists/"+url.PathEscape(id), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -308,7 +374,7 @@ func (c *Client) AddTracks(ctx context.Context, playlistID string, tracks []Trac
 		return nil, nil
 	}
 	body := addTracksRequest{Tracks: tracks, Position: position}
-	path := "/api/v1/playlists/" + url.PathEscape(playlistID) + "/tracks"
+	path := "/api/v3/playlists/" + url.PathEscape(playlistID) + "/tracks"
 	data, err := c.do(ctx, http.MethodPost, path, body)
 	if err != nil {
 		return nil, err
@@ -326,14 +392,14 @@ func (c *Client) RemoveTracks(ctx context.Context, playlistID string, trackIDs [
 		return nil
 	}
 	body := removeTracksRequest{TrackIDs: trackIDs}
-	path := "/api/v1/playlists/" + url.PathEscape(playlistID) + "/tracks/remove"
+	path := "/api/v3/playlists/" + url.PathEscape(playlistID) + "/tracks/remove"
 	_, err := c.do(ctx, http.MethodPost, path, body)
 	return err
 }
 
 // ResolveSources links tracks to the sources now available for their albums.
 func (c *Client) ResolveSources(ctx context.Context, playlistID string) (map[string][]string, error) {
-	path := "/api/v1/playlists/" + url.PathEscape(playlistID) + "/resolve-sources"
+	path := "/api/v3/playlists/" + url.PathEscape(playlistID) + "/resolve-sources"
 	data, err := c.do(ctx, http.MethodPost, path, map[string]string{})
 	if err != nil {
 		return nil, err
@@ -355,12 +421,12 @@ func (c *Client) ListAlbumTracks(ctx context.Context, albumID string) ([]Library
 		params.Set("limit", strconv.Itoa(libraryPageSize))
 		params.Set("offset", strconv.Itoa(offset))
 
-		path := "/api/v1/library/albums/" + url.PathEscape(albumID) + "/tracks?" + params.Encode()
+		path := "/api/v3/library/albums/" + url.PathEscape(albumID) + "/tracks?" + params.Encode()
 		data, err := c.do(ctx, http.MethodGet, path, nil)
 		if err != nil {
 			return nil, err
 		}
-		var resp libraryTracksResponse
+		var resp albumTracksResponse
 		if err := json.Unmarshal(data, &resp); err != nil {
 			return nil, fmt.Errorf("decode album tracks: %w", err)
 		}
@@ -381,7 +447,7 @@ func (c *Client) ListAlbumTracks(ctx context.Context, albumID string) ([]Library
 // Fields scoped to the album (notably "album" itself) apply to every track of
 // that album, so this is the entry point for renaming an album.
 func (c *Client) GetTagEditor(ctx context.Context, trackID string) (*TagEditor, error) {
-	path := "/api/v1/library/management/tracks/" + url.PathEscape(trackID) + "/tag-editor"
+	path := "/api/v3/library/management/tracks/" + url.PathEscape(trackID) + "/tag-editor"
 	data, err := c.do(ctx, http.MethodGet, path, nil)
 	if err != nil {
 		return nil, err
@@ -395,7 +461,7 @@ func (c *Client) GetTagEditor(ctx context.Context, trackID string) (*TagEditor, 
 
 // CreateTagEditPreview stages metadata changes and returns the job to confirm.
 func (c *Client) CreateTagEditPreview(ctx context.Context, request TagEditPreviewRequest) (*PreviewRef, error) {
-	data, err := c.do(ctx, http.MethodPost, "/api/v1/library/management/tag-edit-previews", request)
+	data, err := c.do(ctx, http.MethodPost, "/api/v3/library/management/tag-edit-previews", request)
 	if err != nil {
 		return nil, err
 	}
@@ -411,7 +477,7 @@ func (c *Client) CreateTagEditPreview(ctx context.Context, request TagEditPrevie
 
 // GetManagementPreview returns the state of a staged management job.
 func (c *Client) GetManagementPreview(ctx context.Context, jobID string) (*ManagementPreview, error) {
-	path := "/api/v1/library/management/previews/" + url.PathEscape(jobID)
+	path := "/api/v3/library/management/previews/" + url.PathEscape(jobID)
 	data, err := c.do(ctx, http.MethodGet, path, nil)
 	if err != nil {
 		return nil, err
@@ -425,7 +491,7 @@ func (c *Client) GetManagementPreview(ctx context.Context, jobID string) (*Manag
 
 // ApplyManagementPreview confirms a staged job and queues the work.
 func (c *Client) ApplyManagementPreview(ctx context.Context, jobID string, request ApplyPreviewRequest) (*OperationRef, error) {
-	path := "/api/v1/library/management/previews/" + url.PathEscape(jobID) + "/apply"
+	path := "/api/v3/library/management/previews/" + url.PathEscape(jobID) + "/apply"
 	data, err := c.do(ctx, http.MethodPost, path, request)
 	if err != nil {
 		return nil, err
@@ -437,10 +503,15 @@ func (c *Client) ApplyManagementPreview(ctx context.Context, jobID string, reque
 	return &ref, nil
 }
 
-// DiscardManagementPreview abandons a staged job without applying it.
-func (c *Client) DiscardManagementPreview(ctx context.Context, jobID string) error {
-	path := "/api/v1/library/management/previews/" + url.PathEscape(jobID) + "/discard"
-	_, err := c.do(ctx, http.MethodPost, path, map[string]any{})
+// DiscardManagementPreview abandons a staged job without applying it. The
+// endpoint requires the operation row revision the preview was read with.
+func (c *Client) DiscardManagementPreview(ctx context.Context, jobID string, expectedRevision json.RawMessage) error {
+	if len(expectedRevision) == 0 {
+		expectedRevision = json.RawMessage("0")
+	}
+	body := DiscardPreviewRequest{ExpectedOperationRowRevision: expectedRevision}
+	path := "/api/v3/library/management/previews/" + url.PathEscape(jobID) + "/discard"
+	_, err := c.do(ctx, http.MethodPost, path, body)
 	return err
 }
 

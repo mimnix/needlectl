@@ -23,6 +23,8 @@ type Track struct {
 	DiscNumber      int
 	DurationSeconds float64
 	Format          string
+	// Revision is the library row revision, used for revision-guarded deletes.
+	Revision int64
 }
 
 // ErrNoMatch is returned when no track matches the query.

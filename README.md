@@ -1,7 +1,7 @@
 # needlectl
 
 `needlectl` is a command-line client for a self-hosted [DroppedNeedle](https://www.droppedneedle.com/)
-instance. It talks to DroppedNeedle over its REST API (`/api/v1`) and manages the
+instance. It talks to DroppedNeedle over its REST API (`/api/v3`) and manages the
 native library and playlists: importing CSV playlists (such as a Spotify library
 export), relinking a playlist's unplayable tracks to library files, and deleting
 albums or single tracks.
@@ -173,29 +173,20 @@ Global flags (available on every command):
 ### `needlectl import tracks <path>...`
 
 Uploads audio tracks to DroppedNeedle's drop import and waits for identification.
-The server always identifies the files itself first; with `--mb` the entries it
-could not identify (`needs_review`) are then matched to the given release group.
-Entries the server imported on its own are left untouched.
-
-The MusicBrainz reference accepts a **release URL**, a **release-group URL** or a
-bare **MBID**. A release URL is resolved to its release group with a single
-lookup on musicbrainz.org; a release-group reference needs no lookup at all.
+DroppedNeedle always identifies the files itself: it groups them into
+album-shaped items and reports how each one ended up.
 
 ```
-$ needlectl import tracks ~/Downloads/"DOUBLE-DEAL (Live) - T.M.Revolution.mp3" \
-    --mb https://musicbrainz.org/release/0c641ca7-3d67-4993-81b4-e2d0c2433010
-› Resolving https://musicbrainz.org/release/0c641ca7-… in MusicBrainz
-  release group e49c0013-dc74-4fad-b100-ae4d0fe7a1ea
+$ needlectl import tracks ~/Downloads/"DOUBLE-DEAL (Live) - T.M.Revolution.mp3"
 › Uploading 1 file to https://music.example.com
 ✓ Uploaded as job 461dafd3 from DOUBLE-DEAL (Live) - T.M.Revolution.mp3
 › Waiting for DroppedNeedle to identify the files
-  item 15  needs_review  Loose tracks (0/1 files)
-         Couldn't work out which album this is. Match it manually.
-› Matching to release group e49c0013-dc74-4fad-b100-ae4d0fe7a1ea
-✓ item 15 matched to T.M.R. LIVE REVOLUTION'15 -Strikes Back XI- · T.M.Revolution (1/1 files)
-
-✓ Matched 1 entry
+  item 15  imported  T.M.R. LIVE REVOLUTION'15 -Strikes Back XI- · T.M.Revolution (1/1 files)
 ```
+
+An item the server could not identify is reported as `needs_review`.
+**DroppedNeedle v3 removed the API for resolving those entries**, so they have to
+be decided in its web UI; the command prints a warning naming them.
 
 Directories are walked recursively; hidden files and directories are skipped.
 
@@ -203,35 +194,15 @@ Flags:
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--mb string` | – | MusicBrainz release or release-group URL/MBID to match unidentified entries against. |
-| `--wait` | `true` | Wait for identification to finish before matching. |
+| `--wait` | `true` | Wait for identification to finish before reporting. |
 | `--timeout duration` | `5m` | How long to wait for identification. |
-| `--dry-run` | `false` | Show what would be uploaded and matched without doing it. |
-
-### `needlectl import match <item-id>... | --all`
-
-Matches entries that are waiting for review, exactly like the manual match in the
-web UI. Find the ids with `needlectl import jobs --status needs_review`.
-
-```
-$ needlectl import match 15 --mb https://musicbrainz.org/release-group/e49c0013-dc74-4fad-b100-ae4d0fe7a1ea
-$ needlectl import match --all --mb https://musicbrainz.org/release/0c641ca7-3d67-4993-81b4-e2d0c2433010
-```
-
-Only entries that still await review are touched. Entries DroppedNeedle already
-imported are reported as left alone, never overwritten.
-
-Flags:
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--mb string` | – | **Required.** MusicBrainz release or release-group URL/MBID. |
-| `--all` | `false` | Match every entry that is waiting for review. |
-| `--dry-run` | `false` | Show what would be matched without doing it. |
+| `--dry-run` | `false` | Show what would be uploaded without doing it. |
 
 ### `needlectl import jobs`
 
 Lists the drop import jobs of the signed-in user together with their entries.
+DroppedNeedle v3 has no single-job endpoint, so the list is read from
+`GET /api/v3/import/jobs`, which already carries every item.
 
 ```
 $ needlectl import jobs --status needs_review
@@ -239,7 +210,7 @@ $ needlectl import jobs --status needs_review
   job:          461dafd3
   uploaded:     DOUBLE-DEAL (Live) - T.M.Revolution.mp3
   item 15  needs_review  Loose tracks (0/1 files)
-         Couldn't work out which album this is. Match it manually.
+         Couldn't work out which album this is. Decide it in the web UI.
 
 ✓ 1 job, 1 entry
 ```
@@ -557,7 +528,7 @@ Linked entries also carry the album's **cover art**. DroppedNeedle stores the
 artwork reference on the playlist row itself and never derives one from the
 library file, so an entry created without it shows no cover — and the playlist's
 own cover is assembled from those same per-track references. `needlectl` sets
-`cover_url` to `/api/v1/covers/release-group/<album id>?size=250` whenever the
+`cover_url` to `/api/v3/covers/release-group/<album id>?size=250` whenever the
 matched library track reports `cover_available`, so imported and relinked tracks
 get artwork. Albums with no artwork in DroppedNeedle stay without one.
 
@@ -616,7 +587,7 @@ Track name,Artist name,Album,Track number,Duration (ms)
 
 1. **Read the CSV** and normalise the rows.
 2. **Authenticate** with the credentials from `~/.needlectl.conf`.
-3. **Load the library** (`GET /api/v1/library/tracks`, paginated) and build a
+3. **Load the library** (`GET /api/v3/library/tracks`, cursor-paginated) and build a
    match index.
 4. **Resolve the playlist** by name, creating it if needed.
 5. **Build a plan** (a pure diff, no side effects) between the CSV rows and the
@@ -691,13 +662,13 @@ server = "http://192.168.1.20:8688"
 
 ## API reference
 
-Endpoints used, all under `/api/v1`:
+Endpoints used, all under `/api/v3`:
 
 | Method & path | Purpose |
 |---------------|---------|
-| `POST /auth/login` | `{username, password}` → `{token, user}` |
-| `GET /auth/me` | Verify the session |
-| `GET /library/tracks?q=&limit=&offset=` | Native library listing / track search (max 200 per page) |
+| `POST /auth/login` | `{username, password, transport:"bearer"}` → `{token, user}` (tokens are only issued in bearer mode) |
+| `GET /me` | Verify the session |
+| `GET /library/tracks?q=&limit=&after=` | Native library listing / track search (cursor-paged, max 200 per page) |
 | `GET /playlists` | List playlists |
 | `POST /playlists` | `{name}` → create a playlist |
 | `GET /playlists/{id}` | Playlist with tracks |
@@ -705,31 +676,35 @@ Endpoints used, all under `/api/v1`:
 | `POST /playlists/{id}/tracks/remove` | `{track_ids}` → remove entries |
 | `POST /playlists/{id}/resolve-sources` | Link/heal track sources (used by `playlist relink --resolve`) |
 | `PATCH /playlists/{id}/tracks/{id}` | Update `source_type`/`available_sources` only (cannot set a library file) |
-| `GET /library/albums?q=&page=&page_size=` | Search the library albums |
-| `GET /library/albums/{id}` | Album detail (used by `album delete --id`) |
-| `DELETE /library/album/{id}?delete_files=&stop_wanted=` | Remove an album and cascade its tracks |
-| `DELETE /library/tracks/{id}` | Remove a single track (always deletes its file) |
-| `GET /library/albums/{id}/tracks` | Album track list (used to open the tag editor) |
+| `GET /library/albums?q=&limit=&after=` | Search the library albums (cursor-paged) |
+| `GET /library/albums/{id}` | Album detail, including the row/listing revisions deletes need |
+| `DELETE /library/albums/{id}?expected_revision=&expected_listing_revision=&delete_files=&stop_wanted=` | Remove an album and cascade its tracks |
+| `DELETE /library/tracks/{id}?expected_revision=&delete_file=` | Remove a single track (the file is always deleted) |
+| `GET /library/albums/{id}/tracks?limit=&offset=` | Album track list (used to open the tag editor) |
 | `GET /library/management/tracks/{id}/tag-editor` | Editable metadata fields, scopes and revisions |
 | `POST /library/management/tag-edit-previews` | Stage a metadata edit (`local_track_id`, `mode`, `fields`, `expected_settings_revision`, `expected_policy_revision`, `idempotency_key`) |
 | `GET /library/management/previews/{id}` | Staged preview state (`ready_for_confirmation`, `operation_row_revision`) |
 | `POST /library/management/previews/{id}/apply` | Apply a preview (`preview_token`, `expected_operation_row_revision`, `idempotency_key`, `confirmation`) |
-| `POST /library/management/previews/{id}/discard` | Abandon a staged preview without applying it |
+| `POST /library/management/previews/{id}/discard` | Abandon a staged preview (`expected_operation_row_revision`) |
 | `POST /import/uploads` | Multipart `files` → drop import job (the server identifies the files itself) |
-| `GET /import/jobs?all=` | Import jobs with their entries |
-| `GET /import/jobs/{id}` | One import job |
-| `POST /import/items/{id}/match` | `{release_group_mbid}` → bind an entry to a release group |
+| `GET /import/jobs?all=` | Import jobs with their entries (the client filters by id) |
 
 Authentication uses `Authorization: Bearer <token>`. An entry is considered
 *linked* when it has a `library_file_id`, a `track_source_id`, or a non-empty
 `source_type`; candidate `available_sources` alone do not count.
 
-> `DELETE /library/album/{id}` is admin-only. `delete_files` defaults to `false`
-> on the API, but `needlectl` defaults to deleting files and requires
-> `--keep-files` to opt out.
+> `DELETE /library/albums/{id}` is admin-only and requires both the album's
+> `row_revision` and `listing_revision`. `delete_files` defaults to `false` on
+> the API, but `needlectl` defaults to deleting files and requires `--keep-files`
+> to opt out.
 >
 > `DELETE /library/tracks/{id}` requires the curator role (admin satisfies it)
-> and accepts no options: the track's file is always deleted from disk.
+> and the track's `row_revision`; the file is always deleted from disk. Since v3
+> has no single-track read endpoint, `needlectl` scans the library listing when
+> it was not given the revision.
+>
+> `GET /playlists/{id}` already includes the playlist's tracks; v3 has no
+> separate track-list endpoint.
 >
 > `PATCH /playlists/{id}/tracks/{id}` cannot attach a library file to an entry:
 > it only stores `source_type`/`available_sources` and resolves the file from the
@@ -741,7 +716,7 @@ Authentication uses `Authorization: Bearer <token>`. An entry is considered
 > the linked library file. The playlist cover list is built from those same
 > per-track values (`SELECT DISTINCT cover_url … LIMIT 4`), so entries added
 > without a cover contribute neither per-track art nor a playlist image.
-> `/api/v1/covers/release-group/{id}` takes the album's MusicBrainz release-group
+> `/api/v3/covers/release-group/{id}` takes the album's MusicBrainz release-group
 > id, which is the `album_id` of a library track.
 >
 > Library management (used by `album rename` and `track rename`) must be active
@@ -757,10 +732,9 @@ Authentication uses `Authorization: Bearer <token>`. An entry is considered
 > them keep their stored sources.
 >
 > `POST /import/uploads` accepts **only** the multipart `files` field: there is no
-> way to attach a MusicBrainz reference at upload time, so the server always
-> identifies the files first and matching is a second call per entry.
-> `POST /import/items/{id}/match` takes a `release_group_mbid` (not a release
-> id), which is why a release URL has to be resolved before matching.
+> way to attach a MusicBrainz reference at upload time. DroppedNeedle v3 removed
+> the per-item match endpoint as well, so entries that end in `needs_review` can
+> only be resolved in the server's web UI.
 
 ## Development
 
@@ -791,7 +765,6 @@ cmd/
   import_tracks.go           upload tracks and match them
   import_match.go            match import entries to a MusicBrainz release
   import_jobs.go             list import jobs and their entries
-  import_mb.go               MusicBrainz reference resolution for --mb
   album.go                   album delete + album rename commands
   track.go                   track delete + track rename commands
   tag_edit.go                shared staged tag-edit flow (preview, confirm, apply)
@@ -806,7 +779,6 @@ internal/
   tracks/                    track query resolution (unique-match only)
   relink/                    playlist relink plan + orchestration
   importer/                  pure import plan + orchestration
-  mbref/                     MusicBrainz reference parsing + release→group lookup
   output/                    coloured, structured terminal output
 ```
 
@@ -825,7 +797,7 @@ is tested with `httptest` and each runner with an in-memory fake API.
 | Login rejected with an unsupported-scheme or embedded-credentials error | Use `http(s)://host[:port]` and put credentials in the config, not the URL. |
 | Certificate error against a self-signed instance | Pass `--insecure` (only if you trust the network path). |
 | Most tracks show as `unlinked` | The tracks are not in the DroppedNeedle library yet. Scan the library, then re-run the import — it will relink them. |
-| `library listing was truncated` / offset mismatch | The server returned inconsistent pagination; the import refuses to run against a partial library. Re-run once the instance is healthy. |
+| `library listing was truncated` / repeated page cursor | The server returned inconsistent pagination; the command refuses to run against a partial library. Re-run once the instance is healthy. |
 | `refusing to guess: narrow the search with --artist or pass --id` | More than one album matched. Re-run with `--artist`, or copy the id from the listed candidates and use `--id`. |
 | `refusing to guess: narrow the search with --artist/--album, or pass --id` | More than one track matched across albums. Re-run with `--artist`/`--album`, or copy the id from the listed candidates and use `--id`. |
 | `refusing to guess: these matches share the album …` | Same-named tracks on one album, where `--artist`/`--album` cannot help. Re-run with `--track` (add `--disc` for multi-disc albums), or copy the id and use `--id`. |
@@ -873,8 +845,9 @@ exports and `~/.needlectl.conf` private.
   not exposed as flags yet, and the server's identity gate applies to both.
 - Duration is stored but not used as a matching guard, so live/remix versions
   with very similar titles could be linked to the wrong file.
-- `import tracks` and `import match` only fix entries that are still
-  `needs_review`. Entries the server imported on its own are deliberately left
+- `import tracks` only reports entries that are still `needs_review`;
+  DroppedNeedle v3 dropped the API to resolve them, so it points at the web UI
+  instead. Entries the server imported on its own are deliberately left
   alone: the API offers no documented way to re-match an entry that was already
   imported, and re-matching one has not been verified, so a wrong automatic match
   still has to be corrected in the web UI or by deleting and re-uploading.

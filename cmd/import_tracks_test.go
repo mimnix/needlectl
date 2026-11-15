@@ -97,16 +97,53 @@ func TestImportTracksCommandRequiresPaths(t *testing.T) {
 func TestImportTracksDryRunWritesNothing(t *testing.T) {
 	printer, out := testPrinter()
 
-	err := printImportTracksDryRun(printer, []api.UploadFile{{Name: "song.mp3", Path: "/music/song.mp3"}}, "e49c0013")
+	err := printImportTracksDryRun(printer, []api.UploadFile{{Name: "song.mp3", Path: "/music/song.mp3"}})
 	if err != nil {
 		t.Fatalf("printImportTracksDryRun returned error: %v", err)
 	}
 
 	got := out.String()
-	for _, want := range []string{"Dry run", "/music/song.mp3", "e49c0013"} {
+	for _, want := range []string{"Dry run", "/music/song.mp3", "web UI"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("dry run output %q does not contain %q", got, want)
 		}
+	}
+	if strings.Contains(got, "--mb") {
+		t.Errorf("dry run output %q still mentions the removed --mb flag", got)
+	}
+}
+
+func TestImportTracksNoLongerOffersAMusicBrainzFlag(t *testing.T) {
+	command := newImportTracksCommand(&globalOptions{})
+	if command.Flags().Lookup("mb") != nil {
+		t.Error("import tracks still registers --mb, but DroppedNeedle v3 has no matching API")
+	}
+}
+
+func TestNeedsReviewItemsCountsOnlyPendingDecisions(t *testing.T) {
+	items := []api.ImportItem{
+		{ID: 1, Status: api.ImportStatusImported},
+		{ID: 2, Status: api.ImportStatusNeedsReview},
+		{ID: 3, Status: api.ImportStatusProcessing},
+		{ID: 4, Status: api.ImportStatusNeedsReview},
+		{ID: 5, Status: api.ImportStatusDiscarded},
+	}
+
+	if got := needsReviewItems(items); got != 2 {
+		t.Errorf("needsReviewItems = %d, want 2", got)
+	}
+	if got := needsReviewItems(nil); got != 0 {
+		t.Errorf("needsReviewItems(nil) = %d, want 0", got)
+	}
+}
+
+func TestSettledLabelReportsProgress(t *testing.T) {
+	items := []api.ImportItem{
+		{Status: api.ImportStatusImported},
+		{Status: api.ImportStatusProcessing},
+	}
+	if got := settledLabel(items); got != "1 of 2 settled" {
+		t.Errorf("settledLabel = %q, want \"1 of 2 settled\"", got)
 	}
 }
 

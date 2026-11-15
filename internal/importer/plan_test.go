@@ -63,7 +63,7 @@ func TestBuildPlanLinksRowsFoundInLibrary(t *testing.T) {
 	if linked.Track.AlbumID == nil || *linked.Track.AlbumID != "rg-1" {
 		t.Errorf("AlbumID = %v, want rg-1", linked.Track.AlbumID)
 	}
-	if linked.Track.CoverURL == nil || *linked.Track.CoverURL != "/api/v1/covers/release-group/rg-1?size=250" {
+	if linked.Track.CoverURL == nil || *linked.Track.CoverURL != "/api/v3/covers/release-group/rg-1?size=250" {
 		t.Errorf("CoverURL = %v, want the album artwork link", linked.Track.CoverURL)
 	}
 

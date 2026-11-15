@@ -122,10 +122,6 @@ func runAlbumDelete(cmd *cobra.Command, opts *globalOptions, input albumDeleteOp
 	if err != nil {
 		return fmt.Errorf("delete album: %w", err)
 	}
-	if removal != nil && !removal.Success {
-		return errors.New("the server reported that the album was not deleted")
-	}
-
 	removed := 0
 	if removal != nil {
 		removed = len(removal.RemovedTrackIDs)

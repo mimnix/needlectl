@@ -7,8 +7,7 @@ import (
 // newImportCommand builds the "import" command group.
 //
 // It is a runnable group: bare "needlectl import foo.csv" keeps importing a CSV
-// playlist exactly as before, while the subcommands cover uploading files and
-// fixing the uploads DroppedNeedle could not identify.
+// playlist exactly as before, while the subcommands cover uploading files.
 func newImportCommand(opts *globalOptions) *cobra.Command {
 	input := importOptions{}
 
@@ -22,8 +21,7 @@ Without a subcommand the command imports a CSV playlist, exactly like
 
 Subcommands:
   playlist <file.csv>   import a CSV playlist
-  tracks <path>...      upload audio tracks and match them to a MusicBrainz release
-  match <item-id>...    match uploads DroppedNeedle could not identify
+  tracks <path>...      upload audio tracks
   jobs                  list import jobs and their items`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -39,7 +37,6 @@ Subcommands:
 	cmd.AddCommand(
 		newImportPlaylistCommand(opts),
 		newImportTracksCommand(opts),
-		newImportMatchCommand(opts),
 		newImportJobsCommand(opts),
 	)
 

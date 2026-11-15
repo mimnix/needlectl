@@ -41,7 +41,7 @@ func TestRootCommandRegistersSubcommands(t *testing.T) {
 func TestImportCommandRegistersSubcommands(t *testing.T) {
 	importCmd := newImportCommand(&globalOptions{})
 
-	wanted := map[string]bool{"playlist": false, "tracks": false, "match": false, "jobs": false}
+	wanted := map[string]bool{"playlist": false, "tracks": false, "jobs": false}
 	for _, command := range importCmd.Commands() {
 		if _, ok := wanted[command.Name()]; ok {
 			wanted[command.Name()] = true
@@ -66,7 +66,7 @@ func TestImportCommandWithoutArgumentsShowsHelp(t *testing.T) {
 	}
 
 	got := out.String()
-	for _, want := range []string{"tracks", "match", "jobs"} {
+	for _, want := range []string{"tracks", "jobs"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("help output does not mention %q:\n%s", want, got)
 		}

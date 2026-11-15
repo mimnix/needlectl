@@ -9,7 +9,8 @@ type User struct {
 	Role        string `json:"role"`
 }
 
-// AuthResponse is returned by POST /api/v1/auth/login.
+// AuthResponse is returned by POST /api/v3/auth/login. DroppedNeedle only
+// returns a token in bearer mode, which the client always requests.
 type AuthResponse struct {
 	Token string `json:"token"`
 	User  User   `json:"user"`
@@ -31,50 +32,69 @@ type LibraryTrack struct {
 	// It is the server's own signal and is not always exact (a rare false
 	// negative), but it keeps the generated cover links from 404ing.
 	CoverAvailable bool `json:"cover_available"`
+	// RowRevision is the optimistic-concurrency revision the delete endpoint
+	// requires back.
+	RowRevision int64 `json:"row_revision"`
 }
 
+// libraryTracksResponse is one cursor page of GET /library/tracks. Next is an
+// opaque cursor for the following page, or null/empty on the last one.
 type libraryTracksResponse struct {
+	Items []LibraryTrack `json:"items"`
+	Next  *string        `json:"next"`
+	Total int            `json:"total"`
+}
+
+// albumTracksResponse is one offset page of GET /library/albums/{id}/tracks.
+type albumTracksResponse struct {
 	Items  []LibraryTrack `json:"items"`
 	Total  int            `json:"total"`
 	Offset int            `json:"offset"`
 	Limit  int            `json:"limit"`
 }
 
+// ManagementHold is the server's management hold on an album. Kind is the
+// reason the library management pipeline leaves it alone.
+type ManagementHold struct {
+	Kind        string `json:"kind"`
+	HandingBack bool   `json:"handing_back"`
+}
+
 // LibraryAlbum is one album of the native DroppedNeedle library.
 type LibraryAlbum struct {
-	ID                        string  `json:"id"`
-	Title                     string  `json:"title"`
-	ArtistID                  string  `json:"artist_id"`
-	ArtistName                string  `json:"artist_name"`
-	MusicBrainzReleaseGroupID *string `json:"musicbrainz_release_group_id"`
-	AlbumIdentityState        string  `json:"album_identity_state"`
-	TrackCount                int     `json:"track_count"`
-	TotalDurationSeconds      float64 `json:"total_duration_seconds"`
-	TotalSizeBytes            int64   `json:"total_size_bytes"`
-	Format                    *string `json:"format"`
-	Year                      *int    `json:"year"`
-	// Identity fields, only present on the album detail response. They explain
-	// why metadata edits can be refused.
-	IdentificationStatus        string  `json:"identification_status"`
-	ReviewID                    *string `json:"review_id"`
-	ManagementIdentityReadiness string  `json:"management_identity_readiness"`
+	ID                   string          `json:"id"`
+	Title                string          `json:"title"`
+	ArtistID             string          `json:"artist_id"`
+	ArtistName           string          `json:"artist_name"`
+	ReleaseGroupMBID     *string         `json:"release_group_mbid"`
+	ReleaseMBID          *string         `json:"release_mbid"`
+	IdentityState        string          `json:"identity_state"`
+	TrackCount           int             `json:"track_count"`
+	TotalDurationSeconds float64         `json:"total_duration_seconds"`
+	TotalSizeBytes       int64           `json:"total_size_bytes"`
+	Format               *string         `json:"format"`
+	Year                 *int            `json:"year"`
+	ManagementHold       *ManagementHold `json:"management_hold"`
+	PendingReviewID      *string         `json:"pending_review_id"`
+	RowRevision          int64           `json:"row_revision"`
+	ListingRevision      int64           `json:"listing_revision"`
 }
 
 type libraryAlbumsResponse struct {
 	Items []LibraryAlbum `json:"items"`
+	Next  *string        `json:"next"`
 	Total int            `json:"total"`
 }
 
-// CatalogRemovalResponse is returned by the album/track removal endpoints. The
-// server cascades album deletion, so RemovedTrackIDs lists every track that was
+// RemovalResponse is returned by the album/track removal endpoints. The server
+// cascades album deletion, so RemovedTrackIDs lists every track that was
 // removed with it.
-type CatalogRemovalResponse struct {
-	Success         bool     `json:"success"`
+type RemovalResponse struct {
 	ID              string   `json:"id"`
 	RemovedTrackIDs []string `json:"removed_track_ids"`
 }
 
-// PlaylistSummary is one row of GET /api/v1/playlists.
+// PlaylistSummary is one row of GET /api/v3/playlists.
 type PlaylistSummary struct {
 	ID         string `json:"id"`
 	Name       string `json:"name"`
@@ -101,7 +121,7 @@ type PlaylistTrack struct {
 	AvailableSources []string `json:"available_sources"`
 	TrackNumber      *int     `json:"track_number"`
 	DiscNumber       *int     `json:"disc_number"`
-	Duration         *int     `json:"duration"`
+	Duration         *float64 `json:"duration"`
 }
 
 // Linked reports whether the track entry is actually tied to a playable
@@ -235,7 +255,6 @@ type PreviewRef struct {
 // ManagementPreview is the state of a staged management job. OperationRowRevision
 // is echoed back verbatim on apply, so it is kept raw to avoid guessing its type.
 type ManagementPreview struct {
-	ID                   string          `json:"id"`
 	JobID                string          `json:"job_id"`
 	State                string          `json:"state"`
 	Stale                bool            `json:"stale"`
@@ -253,6 +272,11 @@ type ApplyPreviewRequest struct {
 	Confirmation                 bool            `json:"confirmation"`
 }
 
+// DiscardPreviewRequest is the body of POST /library/management/previews/{id}/discard.
+type DiscardPreviewRequest struct {
+	ExpectedOperationRowRevision json.RawMessage `json:"expected_operation_row_revision"`
+}
+
 // OperationRef identifies the queued operation an applied preview produced.
 type OperationRef struct {
 	ID string `json:"id"`
@@ -260,14 +284,16 @@ type OperationRef struct {
 
 // Item statuses reported by the drop import endpoints.
 const (
+	ImportStatusProcessing  = "processing"
 	ImportStatusImported    = "imported"
+	ImportStatusSkipped     = "skipped"
 	ImportStatusNeedsReview = "needs_review"
+	ImportStatusFailed      = "failed"
 	ImportStatusDiscarded   = "discarded"
 )
 
 // ImportItem is one group of uploaded files inside an import job. DroppedNeedle
-// identifies an item as a unit, so matching always names an item rather than an
-// individual file.
+// identifies an item as a unit.
 type ImportItem struct {
 	ID               int     `json:"id"`
 	FolderName       string  `json:"folder_name"`
@@ -279,17 +305,20 @@ type ImportItem struct {
 	FilesTotal       int     `json:"files_total"`
 	FilesImported    int     `json:"files_imported"`
 	Detail           *string `json:"detail"`
+	ReasonCode       *string `json:"reason_code"`
+	ReasonAction     *string `json:"reason_action"`
 }
 
 // NeedsReview reports whether DroppedNeedle could not identify the item and is
-// waiting for a manual match.
+// waiting for a decision.
 func (i ImportItem) NeedsReview() bool { return i.Status == ImportStatusNeedsReview }
 
 // Settled reports whether the item reached a final state on its own and will not
 // change again while it is polled.
 func (i ImportItem) Settled() bool {
 	switch i.Status {
-	case ImportStatusImported, ImportStatusNeedsReview, ImportStatusDiscarded:
+	case ImportStatusImported, ImportStatusSkipped, ImportStatusNeedsReview,
+		ImportStatusFailed, ImportStatusDiscarded:
 		return true
 	}
 	return false
