@@ -329,7 +329,14 @@ type ImportJob struct {
 }
 
 // Settled reports whether every item of the job reached a final state.
+//
+// A job whose items have not been listed yet is NOT settled: DroppedNeedle
+// creates the job first and fills in its items while identification runs, so
+// treating "no items" as finished would abandon uploads that are still starting.
 func (j ImportJob) Settled() bool {
+	if len(j.Items) == 0 {
+		return false
+	}
 	for _, item := range j.Items {
 		if !item.Settled() {
 			return false

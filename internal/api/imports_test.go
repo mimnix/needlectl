@@ -238,6 +238,14 @@ func TestGetImportJobRejectsEmptyID(t *testing.T) {
 	}
 }
 
+func TestImportJobWithNoItemsIsNotSettled(t *testing.T) {
+	var job ImportJob
+
+	if job.Settled() {
+		t.Error("a job whose items have not been listed yet must not count as settled")
+	}
+}
+
 func TestMatchImportItemSendsTheReleaseGroup(t *testing.T) {
 	const group = "e49c0013-dc74-4fad-b100-ae4d0fe7a1ea"
 
