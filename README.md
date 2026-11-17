@@ -39,10 +39,13 @@ were imported before the track was available are relinked once it appears.
 - **Playlist relinking** — `needlectl playlist relink` scans an existing playlist
   and links the entries that have no source yet to matching library files. Entries
   that already play are left untouched, so a working link is never replaced.
-- **Track upload with MusicBrainz matching** — `needlectl import tracks` uploads
-  audio files to DroppedNeedle's drop import and then matches the entries the
-  server could not identify itself to a MusicBrainz release or release group, so a
-  release URL is enough instead of pasting ids into the web UI.
+- **Track upload** — `needlectl import tracks` uploads audio files to
+  DroppedNeedle's drop import and reports how the server identified each group;
+  entries it could not identify are listed as `needs_review`.
+- **Held-entry resolution** — `needlectl held list` shows the downloads and
+  uploads waiting for a decision (the "unmatched" files), and `needlectl held
+  match` imports one as the MusicBrainz album you name; a release URL or MBID is
+  resolved to its release group.
 - **`login` command** that stores credentials in `~/.needlectl.conf` (written
   `0600`).
 - **Clean, informative output** with coloured progress and a summary; `--dry-run`
@@ -553,6 +556,76 @@ Flags:
 > catching tracks whose title our matcher cannot align. It cannot help entries
 > that have no album id.
 
+### `needlectl held list`
+
+Lists the downloads and uploads DroppedNeedle kept out of the library because it
+could not accept an album for them — the "unmatched" files. Nothing is lost: the
+files stay on disk, and every entry records why it was held.
+
+```
+$ needlectl held list
+› Authenticating with https://music.example.com
+✓ Signed in as Admin (admin)
+› Loading held entries
+
+  entry:       1
+  album:       Strike — Far Out
+  state:       held · weak_match
+  files:       1
+  guess:       6b2b962f-b2fc-40ac-b418-b1fa161b96cc
+  110. Far Out - Strike.mp3 · mp3 · 3:11 · track 110
+  from soulseek · release ae891a44-138f-4076-b4af-fe29af2f1a5a
+  The files do not match the album closely enough to import them safely.
+
+✓ 1 entry waiting for a decision
+  link one with: needlectl held match <entry-id> <musicbrainz release or release-group URL/MBID>
+```
+
+`guess` is the release group DroppedNeedle tried, not a decision. Use the entry
+id with `held match` to accept a different release.
+
+Flags:
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--all` | `false` | Admins: list every user's entries instead of only yours. |
+
+### `needlectl held match <entry-id> <musicbrainz-release>`
+
+Imports one held entry as the MusicBrainz album you name. This is the manual
+decision the web UI offers on a held entry: the files are paired with the album's
+tracks and go into the library, without the automatic check that refused them.
+
+DroppedNeedle links held files by **release group**, so the reference accepts a
+release URL, a release-group URL or a bare MBID. A release (or a bare MBID whose
+entity is unknown) is resolved to its group with a lookup on musicbrainz.org.
+
+```
+$ needlectl held match 1 https://musicbrainz.org/release/ae891a44-138f-4076-b4af-fe29af2f1a5a
+…
+› Resolving https://musicbrainz.org/release/ae891a44-… in MusicBrainz
+✓ Resolved to release group 6b2b962f-b2fc-40ac-b418-b1fa161b96cc
+
+  release:     6b2b962f-b2fc-40ac-b418-b1fa161b96cc
+  files:       1
+
+! this imports the entry's 1 file into the library as release group 6b2b962f-…
+Import held entry 1? [y/N]: y
+› Importing held entry 1 as release group 6b2b962f-…
+✓ Held entry 1 resolved
+  imported:    1
+```
+
+Matching imports the files; it downloads nothing. Files the server cannot pair
+with the album stay held and are reported as `still held`.
+
+Flags:
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--yes` | `false` | Do not ask for confirmation (required when stdin is not a terminal). |
+| `--dry-run` | `false` | Resolve the reference and show what would be imported without importing it. |
+
 ## CSV format
 
 The parser accepts the Spotify "library" export format and similar files. The
@@ -688,6 +761,8 @@ Endpoints used, all under `/api/v3`:
 | `POST /library/management/previews/{id}/discard` | Abandon a staged preview (`expected_operation_row_revision`) |
 | `POST /import/uploads` | Multipart `files` → drop import job (the server identifies the files itself) |
 | `GET /import/jobs?all=` | Import jobs with their entries (the client filters by id) |
+| `GET /held?all=` | Entries waiting for a decision (the unmatched downloads/uploads) |
+| `POST /held/{id}/match` | `{release_group_mbid}` → import an entry's held files as that album |
 
 Authentication uses `Authorization: Bearer <token>`. An entry is considered
 *linked* when it has a `library_file_id`, a `track_source_id`, or a non-empty
@@ -735,6 +810,11 @@ Authentication uses `Authorization: Bearer <token>`. An entry is considered
 > way to attach a MusicBrainz reference at upload time. DroppedNeedle v3 removed
 > the per-item match endpoint as well, so entries that end in `needs_review` can
 > only be resolved in the server's web UI.
+>
+> `POST /held/{id}/match` takes a **release group**, not a release; `needlectl`
+> resolves a release URL or MBID to its group on musicbrainz.org before calling
+> it. The endpoint imports every file of the entry and reports how many were
+> imported, were already owned, stayed held or were discarded.
 
 ## Development
 
@@ -762,9 +842,9 @@ cmd/
   login.go                   interactive login
   import.go                  import command group (legacy CSV alias + subcommands)
   import_playlist.go         CSV playlist import
-  import_tracks.go           upload tracks and match them
-  import_match.go            match import entries to a MusicBrainz release
+  import_tracks.go           upload audio tracks
   import_jobs.go             list import jobs and their entries
+  held.go                    held-entry list + MusicBrainz release match
   album.go                   album delete + album rename commands
   track.go                   track delete + track rename commands
   tag_edit.go                shared staged tag-edit flow (preview, confirm, apply)
@@ -777,6 +857,7 @@ internal/
   link/                      shared library-linking primitives
   albums/                    album query resolution (unique-match only)
   tracks/                    track query resolution (unique-match only)
+  mbref/                     MusicBrainz reference parsing + release→group lookup
   relink/                    playlist relink plan + orchestration
   importer/                  pure import plan + orchestration
   output/                    coloured, structured terminal output
