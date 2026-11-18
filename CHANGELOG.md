@@ -10,6 +10,8 @@ workflow publishes on GitHub.
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-11-19
+
 ### Added
 
 - CSV playlist import with a tolerant parser (UTF-8/UTF-16 BOM, CRLF, quoted
@@ -34,4 +36,5 @@ workflow publishes on GitHub.
 - Resource-first command grammar: every command is `<resource> <operation>`.
 - MIT license.
 
-[Unreleased]: https://github.com/mimnix/needlectl/commits/main
+[Unreleased]: https://github.com/mimnix/needlectl/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/mimnix/needlectl/releases/tag/v0.1.0

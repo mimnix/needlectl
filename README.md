@@ -4,11 +4,11 @@
   <img src="assets/logo.png" alt="needlectl logo">
 </p>
 
-`needlectl` is a command-line client for a self-hosted [DroppedNeedle](https://www.droppedneedle.com/)
-instance. It talks to DroppedNeedle over its REST API (`/api/v3`) and manages the
-native library and playlists: importing CSV playlists (such as a Spotify library
-export), relinking a playlist's unplayable tracks to library files, and deleting
-albums or single tracks.
+`needlectl` is a command-line client for
+[DroppedNeedle](https://www.droppedneedle.com/). It talks to DroppedNeedle over
+its REST API (`/api/v3`) and manages the native library and playlists: importing
+CSV playlists (such as a Spotify library export), relinking a playlist's
+unplayable tracks to library files, and deleting albums or single tracks.
 
 The import is **idempotent** and **library-aware**: tracks that already exist in
 your DroppedNeedle library are linked to their library file, and entries that

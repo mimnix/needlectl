@@ -37,7 +37,7 @@ fi
 section="$(
   awk -v heading="## [${version}]" '
     index($0, heading) == 1 { found = 1; next }
-    found && /^## \[/ { exit }
+    found && (/^## \[/ || /^\[[^]]+\]:/) { exit }
     found { print }
   ' "$changelog" | sed '/./,$!d'
 )"

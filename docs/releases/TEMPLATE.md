@@ -19,5 +19,11 @@ CHANGELOG.md, not here.
 
 ## Links
 
-- Full changelog: [CHANGELOG.md](../../CHANGELOG.md)
+<!--
+The body is rendered on the release page, not inside docs/, so links must be
+absolute.
+-->
+
+- Full changelog:
+  [CHANGELOG.md](https://github.com/mimnix/needlectl/blob/main/CHANGELOG.md)
 - Compare: https://github.com/mimnix/needlectl/compare/vPREVIOUS...vX.Y.Z
