@@ -92,12 +92,12 @@ func TestPrintImportJobRendersItems(t *testing.T) {
 	}
 }
 
-func TestImportJobsCommandExposesFilters(t *testing.T) {
-	jobs := newImportJobsCommand(&globalOptions{})
+func TestImportListCommandExposesFilters(t *testing.T) {
+	jobs := newImportListCommand(&globalOptions{})
 
 	for _, name := range []string{"all", "status"} {
 		if jobs.Flags().Lookup(name) == nil {
-			t.Errorf("import jobs does not expose --%s", name)
+			t.Errorf("import list does not expose --%s", name)
 		}
 	}
 }

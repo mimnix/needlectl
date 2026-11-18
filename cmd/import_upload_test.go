@@ -83,23 +83,23 @@ func TestCollectUploadFilesRejectsEmptySelections(t *testing.T) {
 	}
 }
 
-func TestImportTracksCommandRequiresPaths(t *testing.T) {
+func TestImportUploadCommandRequiresPaths(t *testing.T) {
 	root := newRootCommand()
-	root.SetArgs([]string{"import", "tracks"})
+	root.SetArgs([]string{"import", "upload"})
 	root.SetOut(&bytes.Buffer{})
 	root.SetErr(&bytes.Buffer{})
 
 	if err := root.Execute(); err == nil {
-		t.Fatal("import tracks without a path returned nil error, want a failure")
+		t.Fatal("import upload without a path returned nil error, want a failure")
 	}
 }
 
-func TestImportTracksDryRunWritesNothing(t *testing.T) {
+func TestImportUploadDryRunWritesNothing(t *testing.T) {
 	printer, out := testPrinter()
 
-	err := printImportTracksDryRun(printer, []api.UploadFile{{Name: "song.mp3", Path: "/music/song.mp3"}})
+	err := printImportUploadDryRun(printer, []api.UploadFile{{Name: "song.mp3", Path: "/music/song.mp3"}})
 	if err != nil {
-		t.Fatalf("printImportTracksDryRun returned error: %v", err)
+		t.Fatalf("printImportUploadDryRun returned error: %v", err)
 	}
 
 	got := out.String()
@@ -113,10 +113,10 @@ func TestImportTracksDryRunWritesNothing(t *testing.T) {
 	}
 }
 
-func TestImportTracksNoLongerOffersAMusicBrainzFlag(t *testing.T) {
-	command := newImportTracksCommand(&globalOptions{})
+func TestImportUploadNoLongerOffersAMusicBrainzFlag(t *testing.T) {
+	command := newImportUploadCommand(&globalOptions{})
 	if command.Flags().Lookup("mb") != nil {
-		t.Error("import tracks still registers --mb, but DroppedNeedle v3 has no matching API")
+		t.Error("import upload still registers --mb, but DroppedNeedle v3 has no matching API")
 	}
 }
 

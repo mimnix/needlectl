@@ -47,6 +47,7 @@ The connection settings (server URL, username and password) are stored in
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		Version:       version,
+		RunE:          groupRunE,
 	}
 
 	root.PersistentFlags().StringVar(&opts.configPath, "config", "", "config file to use (default ~/.needlectl.conf)")
@@ -63,6 +64,15 @@ The connection settings (server URL, username and password) are stored in
 	root.AddCommand(newHeldCommand(opts))
 
 	return root
+}
+
+// groupRunE makes a command group show help without arguments and reject an
+// unknown operation instead of silently printing help and exiting 0.
+func groupRunE(cmd *cobra.Command, args []string) error {
+	if len(args) == 0 {
+		return cmd.Help()
+	}
+	return fmt.Errorf("unknown command %q for %q", args[0], cmd.CommandPath())
 }
 
 func (o *globalOptions) printer() *output.Printer {

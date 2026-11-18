@@ -19,6 +19,7 @@ func newHeldCommand(opts *globalOptions) *cobra.Command {
 	held := &cobra.Command{
 		Use:   "held",
 		Short: "Inspect and resolve entries waiting for a decision",
+		RunE:  groupRunE,
 		Long: `Work with the entries DroppedNeedle kept out of the library because it could
 not accept an album for them.
 
@@ -112,7 +113,7 @@ func newHeldMatchCommand(opts *globalOptions) *cobra.Command {
 	input := heldMatchOptions{}
 
 	cmd := &cobra.Command{
-		Use:   "match <entry-id> <musicbrainz-release>",
+		Use:   "match <entry-id> <reference>",
 		Short: "Import a held entry as a specific MusicBrainz album",
 		Long: `Import the files of one held entry into the library as the album you name.
 

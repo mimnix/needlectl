@@ -650,8 +650,8 @@ func TestDeleteTrackSendsTheKnownRevision(t *testing.T) {
 		if got := r.URL.Query().Get("expected_revision"); got != "9" {
 			t.Errorf("expected_revision = %q, want 9", got)
 		}
-		if got := r.URL.Query().Get("delete_file"); got != "true" {
-			t.Errorf("delete_file = %q, want true", got)
+		if got := r.URL.Query().Get("delete_file"); got != "false" {
+			t.Errorf("delete_file = %q, want false", got)
 		}
 		body = RemovalResponse{ID: "track-1", RemovedTrackIDs: []string{"track-1"}}
 		writeJSON(t, w, body)
@@ -663,7 +663,7 @@ func TestDeleteTrackSendsTheKnownRevision(t *testing.T) {
 		t.Fatalf("New returned error: %v", err)
 	}
 
-	removal, err := client.DeleteTrack(context.Background(), "track-1", 9)
+	removal, err := client.DeleteTrack(context.Background(), "track-1", 9, false)
 	if err != nil {
 		t.Fatalf("DeleteTrack returned error: %v", err)
 	}
@@ -702,6 +702,9 @@ func TestDeleteTrackLooksUpTheRevisionWhenMissing(t *testing.T) {
 			if got := r.URL.Query().Get("expected_revision"); got != "42" {
 				t.Errorf("expected_revision = %q, want the listed row revision 42", got)
 			}
+			if got := r.URL.Query().Get("delete_file"); got != "true" {
+				t.Errorf("delete_file = %q, want true", got)
+			}
 			writeJSON(t, w, RemovalResponse{ID: "track-1", RemovedTrackIDs: []string{"track-1"}})
 		default:
 			http.NotFound(w, r)
@@ -714,7 +717,7 @@ func TestDeleteTrackLooksUpTheRevisionWhenMissing(t *testing.T) {
 		t.Fatalf("New returned error: %v", err)
 	}
 
-	if _, err := client.DeleteTrack(context.Background(), "track-1", 0); err != nil {
+	if _, err := client.DeleteTrack(context.Background(), "track-1", 0, true); err != nil {
 		t.Fatalf("DeleteTrack returned error: %v", err)
 	}
 	if len(methods) != 2 || methods[0] != http.MethodGet || methods[1] != http.MethodDelete {
@@ -739,7 +742,7 @@ func TestDeleteTrackRejectsATrackThatIsNotInTheLibrary(t *testing.T) {
 		t.Fatalf("New returned error: %v", err)
 	}
 
-	if _, err := client.DeleteTrack(context.Background(), "missing", -1); err == nil {
+	if _, err := client.DeleteTrack(context.Background(), "missing", -1, true); err == nil {
 		t.Fatal("DeleteTrack returned nil error, want a lookup failure")
 	}
 }

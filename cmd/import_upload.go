@@ -16,19 +16,19 @@ import (
 	"github.com/spf13/cobra"
 )
 
-type importTracksOptions struct {
+type importUploadOptions struct {
 	wait    bool
 	timeout time.Duration
 	dryRun  bool
 }
 
-func newImportTracksCommand(opts *globalOptions) *cobra.Command {
-	input := importTracksOptions{}
+func newImportUploadCommand(opts *globalOptions) *cobra.Command {
+	input := importUploadOptions{}
 
 	cmd := &cobra.Command{
-		Use:   "tracks <path>...",
-		Short: "Upload tracks to DroppedNeedle's drop import",
-		Long: `Upload audio tracks to DroppedNeedle's drop import.
+		Use:   "upload <path>...",
+		Short: "Upload files to DroppedNeedle's drop import",
+		Long: `Upload audio files to DroppedNeedle's drop import.
 
 DroppedNeedle identifies the files itself and reports how each group ended up.
 Entries it cannot identify are left in the "needs_review" state; DroppedNeedle v3
@@ -37,7 +37,7 @@ dropped the API for resolving them, so they have to be decided in its web UI.
 Directories are walked recursively; hidden files and directories are skipped.`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runImportTracks(cmd, opts, args, input)
+			return runImportUpload(cmd, opts, args, input)
 		},
 	}
 
@@ -48,7 +48,7 @@ Directories are walked recursively; hidden files and directories are skipped.`,
 	return cmd
 }
 
-func runImportTracks(cmd *cobra.Command, opts *globalOptions, paths []string, input importTracksOptions) error {
+func runImportUpload(cmd *cobra.Command, opts *globalOptions, paths []string, input importUploadOptions) error {
 	printer := opts.printer()
 
 	files, err := collectUploadFiles(paths)
@@ -57,7 +57,7 @@ func runImportTracks(cmd *cobra.Command, opts *globalOptions, paths []string, in
 	}
 
 	if input.dryRun {
-		return printImportTracksDryRun(printer, files)
+		return printImportUploadDryRun(printer, files)
 	}
 
 	cfg, err := opts.loadConfig(printer)
@@ -97,8 +97,8 @@ func runImportTracks(cmd *cobra.Command, opts *globalOptions, paths []string, in
 	return nil
 }
 
-// printImportTracksDryRun reports what an upload would send, without sending it.
-func printImportTracksDryRun(printer *output.Printer, files []api.UploadFile) error {
+// printImportUploadDryRun reports what an upload would send, without sending it.
+func printImportUploadDryRun(printer *output.Printer, files []api.UploadFile) error {
 	printer.Step("Dry run: %s would be uploaded", output.CountLabel(len(files), "file"))
 	for _, file := range files {
 		printer.Info("%s", file.Path)
@@ -167,7 +167,7 @@ func waitForImportJob(ctx context.Context, printer *output.Printer, client *api.
 			return job, nil
 		}
 		if time.Now().After(deadline) {
-			printer.Warn("identification is still running; check it later with 'needlectl import jobs'")
+			printer.Warn("identification is still running; check it later with 'needlectl import list'")
 			return job, nil
 		}
 		printer.Debug("job %s: %s", importJobLabel(job.ID), settledLabel(job.Items))

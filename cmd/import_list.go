@@ -9,34 +9,34 @@ import (
 	"github.com/spf13/cobra"
 )
 
-type importJobsOptions struct {
+type importListOptions struct {
 	all    bool
 	status string
 }
 
-func newImportJobsCommand(opts *globalOptions) *cobra.Command {
-	input := importJobsOptions{}
+func newImportListCommand(opts *globalOptions) *cobra.Command {
+	input := importListOptions{}
 
 	cmd := &cobra.Command{
-		Use:   "jobs",
-		Short: "List import jobs and their entries",
-		Long: `List the drop import jobs of the signed-in user.
+		Use:   "list",
+		Short: "List import batches and their entries",
+		Long: `List the drop import batches of the signed-in user.
 
 Entries DroppedNeedle could not identify are shown as "needs_review". DroppedNeedle
 v3 has no API to resolve them, so they have to be decided in its web UI.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runImportJobs(cmd, opts, input)
+			return runImportList(cmd, opts, input)
 		},
 	}
 
-	cmd.Flags().BoolVar(&input.all, "all", false, "list the jobs of every user instead of only yours")
+	cmd.Flags().BoolVar(&input.all, "all", false, "list the batches of every user instead of only yours")
 	cmd.Flags().StringVar(&input.status, "status", "", "only show entries with this status (for example needs_review)")
 
 	return cmd
 }
 
-func runImportJobs(cmd *cobra.Command, opts *globalOptions, input importJobsOptions) error {
+func runImportList(cmd *cobra.Command, opts *globalOptions, input importListOptions) error {
 	printer := opts.printer()
 
 	cfg, err := opts.loadConfig(printer)
@@ -68,7 +68,7 @@ func runImportJobs(cmd *cobra.Command, opts *globalOptions, input importJobsOpti
 	}
 
 	if shown == 0 {
-		printer.Info("no import jobs%s found", statusSuffix(input.status))
+		printer.Info("no import batches%s found", statusSuffix(input.status))
 		return nil
 	}
 

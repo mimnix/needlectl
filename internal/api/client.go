@@ -283,10 +283,11 @@ func (c *Client) DeleteAlbum(ctx context.Context, albumID string, deleteFiles, s
 
 // DeleteTrack removes a single track from the library.
 //
-// The file is always deleted from disk: DroppedNeedle has no catalog-only
-// variant for a single track. The endpoint requires the track's row revision,
-// which is passed in when the caller already has it; otherwise it is looked up.
-func (c *Client) DeleteTrack(ctx context.Context, trackID string, expectedRevision int64) (*RemovalResponse, error) {
+// When deleteFile is true the file is moved into DroppedNeedle's recycle bin;
+// when false only the catalog entry goes. The endpoint requires the track's row
+// revision, which is passed in when the caller already has it; otherwise it is
+// looked up.
+func (c *Client) DeleteTrack(ctx context.Context, trackID string, expectedRevision int64, deleteFile bool) (*RemovalResponse, error) {
 	if expectedRevision <= 0 {
 		revision, err := c.libraryTrackRevision(ctx, trackID)
 		if err != nil {
@@ -297,7 +298,7 @@ func (c *Client) DeleteTrack(ctx context.Context, trackID string, expectedRevisi
 
 	params := url.Values{}
 	params.Set("expected_revision", strconv.FormatInt(expectedRevision, 10))
-	params.Set("delete_file", "true")
+	params.Set("delete_file", strconv.FormatBool(deleteFile))
 
 	path := "/api/v3/library/tracks/" + url.PathEscape(trackID) + "?" + params.Encode()
 	data, err := c.do(ctx, http.MethodDelete, path, nil)

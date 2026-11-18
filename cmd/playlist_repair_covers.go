@@ -17,18 +17,18 @@ import (
 // limit: one replacement is two requests.
 const coverRepairPause = 100 * time.Millisecond
 
-type playlistCoversOptions struct {
-	argument string
-	byID     bool
-	all      bool
-	dryRun   bool
+type playlistRepairCoversOptions struct {
+	argument     string
+	byID         bool
+	allPlaylists bool
+	dryRun       bool
 }
 
-func newPlaylistCoversCommand(opts *globalOptions) *cobra.Command {
-	input := playlistCoversOptions{}
+func newPlaylistRepairCoversCommand(opts *globalOptions) *cobra.Command {
+	input := playlistRepairCoversOptions{}
 
 	cmd := &cobra.Command{
-		Use:   "covers [playlist]",
+		Use:   "repair-covers [playlist]",
 		Short: "Repair the album covers of a playlist's tracks",
 		Long: `Repair the artwork shown on a playlist's tracks.
 
@@ -43,24 +43,24 @@ writable — so an entry that needs repair is re-added at the same position and
 the old entry removed, which preserves the playlist order. Entries that are not
 linked to the local library are counted and left untouched.
 
-Use --all to repair every playlist you own.`,
+Use --all-playlists to repair every playlist you own.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 1 {
 				input.argument = args[0]
 			}
-			return runPlaylistCovers(cmd, opts, input)
+			return runPlaylistRepairCovers(cmd, opts, input)
 		},
 	}
 
 	cmd.Flags().BoolVar(&input.byID, "id", false, "treat the argument as an exact playlist id")
-	cmd.Flags().BoolVar(&input.all, "all", false, "repair every playlist you own")
+	cmd.Flags().BoolVar(&input.allPlaylists, "all-playlists", false, "repair every playlist you own")
 	cmd.Flags().BoolVar(&input.dryRun, "dry-run", false, "show what would be repaired without modifying any playlist")
 
 	return cmd
 }
 
-func runPlaylistCovers(cmd *cobra.Command, opts *globalOptions, input playlistCoversOptions) error {
+func runPlaylistRepairCovers(cmd *cobra.Command, opts *globalOptions, input playlistRepairCoversOptions) error {
 	if err := input.validate(); err != nil {
 		return err
 	}
@@ -92,7 +92,7 @@ func runPlaylistCovers(cmd *cobra.Command, opts *globalOptions, input playlistCo
 		API:    client,
 		Out:    printer,
 		DryRun: input.dryRun,
-		All:    input.all,
+		All:    input.allPlaylists,
 		Pause:  coverRepairPause,
 	}
 	results, err := runner.Run(cmd.Context(), target)
@@ -114,15 +114,15 @@ func runPlaylistCovers(cmd *cobra.Command, opts *globalOptions, input playlistCo
 
 // validate rejects flag combinations that would silently ignore part of the
 // request.
-func (i playlistCoversOptions) validate() error {
-	if i.all {
+func (i playlistRepairCoversOptions) validate() error {
+	if i.allPlaylists {
 		if strings.TrimSpace(i.argument) != "" || i.byID {
-			return errors.New("--all cannot be combined with a playlist argument or --id")
+			return errors.New("--all-playlists cannot be combined with a playlist argument or --id")
 		}
 		return nil
 	}
 	if strings.TrimSpace(i.argument) == "" {
-		return errors.New("give a playlist name, a playlist id with --id, or --all")
+		return errors.New("give a playlist name, a playlist id with --id, or --all-playlists")
 	}
 	return nil
 }
@@ -151,7 +151,11 @@ func printCoverRepairSummary(printer *output.Printer, results []covers.Result, d
 		printer.Field(result.PlaylistName, coverRepairCountLabel(result, dryRun))
 	}
 	printer.Field("playlists", strconv.Itoa(playlists))
-	printer.Field("repaired", strconv.Itoa(repaired))
+	label := "repaired"
+	if dryRun {
+		label = "to repair"
+	}
+	printer.Field(label, strconv.Itoa(repaired))
 }
 
 func printCoverRepairResult(printer *output.Printer, result covers.Result, dryRun bool) {

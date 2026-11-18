@@ -41,7 +41,7 @@ func TestRootCommandRegistersSubcommands(t *testing.T) {
 func TestImportCommandRegistersSubcommands(t *testing.T) {
 	importCmd := newImportCommand(&globalOptions{})
 
-	wanted := map[string]bool{"playlist": false, "tracks": false, "jobs": false}
+	wanted := map[string]bool{"upload": false, "list": false}
 	for _, command := range importCmd.Commands() {
 		if _, ok := wanted[command.Name()]; ok {
 			wanted[command.Name()] = true
@@ -66,32 +66,32 @@ func TestImportCommandWithoutArgumentsShowsHelp(t *testing.T) {
 	}
 
 	got := out.String()
-	for _, want := range []string{"tracks", "jobs"} {
+	for _, want := range []string{"upload", "list"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("help output does not mention %q:\n%s", want, got)
 		}
 	}
 }
 
-func TestImportCommandRejectsMoreThanOnePlaylist(t *testing.T) {
-	root := newRootCommand()
-	root.SetArgs([]string{"import", "one.csv", "two.csv"})
-	root.SetOut(&bytes.Buffer{})
-	root.SetErr(&bytes.Buffer{})
+func TestPlaylistCommandRegistersImport(t *testing.T) {
+	playlist := newPlaylistCommand(&globalOptions{})
 
-	if err := root.Execute(); err == nil {
-		t.Fatal("import with two arguments returned nil error, want a failure")
+	for _, command := range playlist.Commands() {
+		if command.Name() == "import" {
+			return
+		}
 	}
+	t.Error("playlist command does not register import")
 }
 
-func TestImportPlaylistSubcommandRequiresAnArgument(t *testing.T) {
+func TestPlaylistImportRequiresAnArgument(t *testing.T) {
 	root := newRootCommand()
-	root.SetArgs([]string{"import", "playlist"})
+	root.SetArgs([]string{"playlist", "import"})
 	root.SetOut(&bytes.Buffer{})
 	root.SetErr(&bytes.Buffer{})
 
 	if err := root.Execute(); err == nil {
-		t.Fatal("import playlist without an argument returned nil error, want a failure")
+		t.Fatal("playlist import without an argument returned nil error, want a failure")
 	}
 }
 

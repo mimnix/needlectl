@@ -20,6 +20,7 @@ func newTrackCommand(opts *globalOptions) *cobra.Command {
 	track := &cobra.Command{
 		Use:   "track",
 		Short: "Inspect and manage tracks in the DroppedNeedle library",
+		RunE:  groupRunE,
 	}
 	track.AddCommand(newTrackDeleteCommand(opts))
 	track.AddCommand(newTrackRenameCommand(opts))
@@ -27,14 +28,15 @@ func newTrackCommand(opts *globalOptions) *cobra.Command {
 }
 
 type trackDeleteOptions struct {
-	argument string
-	byID     bool
-	artist   string
-	album    string
-	track    int
-	disc     int
-	yes      bool
-	dryRun   bool
+	argument  string
+	byID      bool
+	artist    string
+	album     string
+	track     int
+	disc      int
+	keepFiles bool
+	yes       bool
+	dryRun    bool
 }
 
 // validate rejects flag combinations that would silently ignore part of the
@@ -63,9 +65,9 @@ func newTrackDeleteCommand(opts *globalOptions) *cobra.Command {
 		Short: "Delete a single track from the library",
 		Long: `Delete a single track from the DroppedNeedle library.
 
-WARNING: the DroppedNeedle API has no catalog-only option for a single track,
-so the audio file is always deleted from disk. Use "album delete --keep-files"
-if you only want to remove catalog entries.
+By default the track's audio file is moved to DroppedNeedle's recycle bin as
+well; pass --keep-files to remove only the catalog entry and keep the file on
+disk.
 
 The track is looked up by name and must match exactly one library track. Use
 --artist and/or --album to narrow the search, --track (and --disc when the same
@@ -90,6 +92,7 @@ session --yes is required.`,
 	cmd.Flags().IntVar(&input.track, "track", 0, "restrict the track lookup to this track number")
 	cmd.Flags().IntVar(&input.disc, "disc", 0, "restrict the track lookup to this disc number")
 	cmd.Flags().BoolVarP(&input.yes, "yes", "y", false, "do not ask for confirmation")
+	cmd.Flags().BoolVar(&input.keepFiles, "keep-files", false, "only remove the track from the catalog; keep the file on disk")
 	cmd.Flags().BoolVar(&input.dryRun, "dry-run", false, "show what would be deleted without deleting anything")
 
 	return cmd
@@ -129,15 +132,16 @@ func runTrackDelete(cmd *cobra.Command, opts *globalOptions, input trackDeleteOp
 	}
 	printTrackTarget(printer, target)
 
+	deleteFile := !input.keepFiles
 	if input.dryRun {
 		printer.Raw("")
 		printer.Success("Dry run complete — nothing was deleted")
-		printer.Field("file", "delete from disk")
+		printer.Field("file", fileAction(deleteFile))
 		return nil
 	}
 
 	if !input.yes {
-		confirmed, err := confirmTrackDeletion(cmd, printer, target)
+		confirmed, err := confirmTrackDeletion(cmd, printer, target, deleteFile)
 		if err != nil {
 			return err
 		}
@@ -148,7 +152,7 @@ func runTrackDelete(cmd *cobra.Command, opts *globalOptions, input trackDeleteOp
 	}
 
 	printer.Step("Deleting track %s", trackLabel(target))
-	removal, err := client.DeleteTrack(cmd.Context(), target.ID, target.Revision)
+	removal, err := client.DeleteTrack(cmd.Context(), target.ID, target.Revision, deleteFile)
 	if err != nil {
 		return fmt.Errorf("delete track: %w", err)
 	}
@@ -161,7 +165,7 @@ func runTrackDelete(cmd *cobra.Command, opts *globalOptions, input trackDeleteOp
 	printer.Success("Track deleted")
 	printer.Field("track", trackLabel(target))
 	printer.Field("removed", strconv.Itoa(removed))
-	printer.Field("file", "deleted from disk")
+	printer.Field("file", fileAction(deleteFile))
 	return nil
 }
 
@@ -217,14 +221,18 @@ func shareAlbum(matches []tracks.Track) bool {
 	return true
 }
 
-func confirmTrackDeletion(cmd *cobra.Command, printer *output.Printer, target tracks.Track) (bool, error) {
+func confirmTrackDeletion(cmd *cobra.Command, printer *output.Printer, target tracks.Track, deleteFile bool) (bool, error) {
 	stdinFile, isFile := cmd.InOrStdin().(*os.File)
 	if !isFile || !output.IsTerminal(stdinFile) {
 		return false, errors.New("refusing to delete without confirmation; re-run with --yes")
 	}
 
 	printer.Raw("")
-	printer.Warn("this permanently deletes the track and its file from disk; DroppedNeedle has no catalog-only option for a single track")
+	if deleteFile {
+		printer.Warn("this removes the track and moves its file to the recycle bin")
+	} else {
+		printer.Warn("this removes the track from the catalog (the file is kept)")
+	}
 
 	fmt.Fprintf(cmd.OutOrStdout(), "Delete %s? [y/N]: ", trackLabel(target))
 	reader := bufio.NewReader(cmd.InOrStdin())

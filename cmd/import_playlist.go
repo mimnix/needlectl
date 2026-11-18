@@ -13,7 +13,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-type importOptions struct {
+type playlistImportOptions struct {
 	path      string
 	name      string
 	dryRun    bool
@@ -22,11 +22,11 @@ type importOptions struct {
 }
 
 func newImportPlaylistCommand(opts *globalOptions) *cobra.Command {
-	input := importOptions{}
+	input := playlistImportOptions{}
 
 	cmd := &cobra.Command{
-		Use:   "playlist <playlist.csv>",
-		Short: "Import a CSV playlist into DroppedNeedle",
+		Use:   "import <playlist.csv>",
+		Short: "Import a CSV playlist",
 		Long: `Import a CSV playlist into a DroppedNeedle playlist.
 
 Tracks already present in the playlist are left untouched, so the command is
@@ -44,7 +44,7 @@ The playlist name defaults to the CSV file name without its extension.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			input.path = args[0]
-			return runImport(cmd, opts, input)
+			return runPlaylistImport(cmd, opts, input)
 		},
 	}
 
@@ -52,17 +52,15 @@ The playlist name defaults to the CSV file name without its extension.`,
 	return cmd
 }
 
-// addPlaylistFlags registers the CSV playlist options. The parent "import"
-// command carries the same set so that the legacy "needlectl import foo.csv"
-// invocation keeps working.
-func addPlaylistFlags(cmd *cobra.Command, input *importOptions) {
+// addPlaylistFlags registers the CSV playlist options.
+func addPlaylistFlags(cmd *cobra.Command, input *playlistImportOptions) {
 	cmd.Flags().StringVar(&input.name, "name", "", "playlist name (default: the CSV file name without extension)")
 	cmd.Flags().BoolVar(&input.dryRun, "dry-run", false, "show what would change without modifying the playlist")
 	cmd.Flags().BoolVar(&input.resolve, "resolve", true, "resolve track sources after importing (links tracks that are now available)")
 	cmd.Flags().IntVar(&input.batchSize, "batch-size", 100, "number of tracks sent per add request")
 }
 
-func runImport(cmd *cobra.Command, opts *globalOptions, input importOptions) error {
+func runPlaylistImport(cmd *cobra.Command, opts *globalOptions, input playlistImportOptions) error {
 	printer := opts.printer()
 
 	cfg, err := opts.loadConfig(printer)

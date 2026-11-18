@@ -61,7 +61,7 @@ func TestAlbumCandidateLabelDistinguishesCopies(t *testing.T) {
 }
 
 func TestFileAndWantedActions(t *testing.T) {
-	if fileAction(true) != "delete from disk" || fileAction(false) != "keep on disk" {
+	if fileAction(true) != "move to the recycle bin" || fileAction(false) != "keep on disk" {
 		t.Errorf("fileAction = %q / %q", fileAction(true), fileAction(false))
 	}
 	if wantedAction(true) != "stop future downloads" || wantedAction(false) != "keep wanted" {

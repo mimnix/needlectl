@@ -6,21 +6,21 @@ import (
 	"github.com/mimmo/needlectl/internal/covers"
 )
 
-func TestPlaylistCoversValidate(t *testing.T) {
-	if err := (playlistCoversOptions{argument: "Anime"}).validate(); err != nil {
+func TestPlaylistRepairCoversValidate(t *testing.T) {
+	if err := (playlistRepairCoversOptions{argument: "Anime"}).validate(); err != nil {
 		t.Errorf("a playlist name was rejected: %v", err)
 	}
-	if err := (playlistCoversOptions{argument: "pl-1", byID: true}).validate(); err != nil {
+	if err := (playlistRepairCoversOptions{argument: "pl-1", byID: true}).validate(); err != nil {
 		t.Errorf("a playlist id was rejected: %v", err)
 	}
-	if err := (playlistCoversOptions{all: true}).validate(); err != nil {
-		t.Errorf("--all alone was rejected: %v", err)
+	if err := (playlistRepairCoversOptions{allPlaylists: true}).validate(); err != nil {
+		t.Errorf("--all-playlists alone was rejected: %v", err)
 	}
 
-	for name, input := range map[string]playlistCoversOptions{
+	for name, input := range map[string]playlistRepairCoversOptions{
 		"nothing":             {},
-		"all with a name":     {argument: "Anime", all: true},
-		"all with an id":      {argument: "pl-1", byID: true, all: true},
+		"all with a name":     {argument: "Anime", allPlaylists: true},
+		"all with an id":      {argument: "pl-1", byID: true, allPlaylists: true},
 		"id without argument": {byID: true},
 		"blank playlist name": {argument: "   "},
 	} {
@@ -44,13 +44,13 @@ func TestCoverRepairCountLabel(t *testing.T) {
 	}
 }
 
-func TestPlaylistCommandRegistersCovers(t *testing.T) {
+func TestPlaylistCommandRegistersRepairCovers(t *testing.T) {
 	playlist := newPlaylistCommand(&globalOptions{})
 
 	for _, command := range playlist.Commands() {
-		if command.Name() == "covers" {
+		if command.Name() == "repair-covers" {
 			return
 		}
 	}
-	t.Error("playlist command does not register covers")
+	t.Error("playlist command does not register repair-covers")
 }

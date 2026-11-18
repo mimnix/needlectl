@@ -16,9 +16,12 @@ func newPlaylistCommand(opts *globalOptions) *cobra.Command {
 	playlist := &cobra.Command{
 		Use:   "playlist",
 		Short: "Inspect and manage playlists",
+		RunE:  groupRunE,
 	}
+	playlist.AddCommand(newImportPlaylistCommand(opts))
 	playlist.AddCommand(newPlaylistRelinkCommand(opts))
-	playlist.AddCommand(newPlaylistCoversCommand(opts))
+	playlist.AddCommand(newPlaylistRepairCoversCommand(opts))
+	playlist.AddCommand(newPlaylistRequestCommand(opts))
 	return playlist
 }
 

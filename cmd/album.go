@@ -19,6 +19,7 @@ func newAlbumCommand(opts *globalOptions) *cobra.Command {
 	album := &cobra.Command{
 		Use:   "album",
 		Short: "Inspect and manage albums in the DroppedNeedle library",
+		RunE:  groupRunE,
 	}
 	album.AddCommand(newAlbumDeleteCommand(opts))
 	album.AddCommand(newAlbumRenameCommand(opts))
@@ -44,9 +45,9 @@ func newAlbumDeleteCommand(opts *globalOptions) *cobra.Command {
 		Long: `Delete an album from the DroppedNeedle library, cascading to every track that
 belongs to it.
 
-By default the audio files are deleted from disk as well; pass --keep-files to
-only remove the album from the catalog. Unless --keep-wanted is given, the album
-is also stopped from being downloaded again.
+By default the audio files are moved to DroppedNeedle's recycle bin as well;
+pass --keep-files to only remove the album from the catalog. Unless --keep-wanted
+is given, the album is also stopped from being downloaded again.
 
 The album is looked up by name and must match exactly one library album; use
 --artist to narrow the search, or --id to pass an exact album id.
@@ -174,7 +175,7 @@ func confirmDeletion(cmd *cobra.Command, printer *output.Printer, target albums.
 
 	printer.Raw("")
 	if deleteFiles {
-		printer.Warn("this permanently deletes the album, its %s and the files on disk",
+		printer.Warn("this removes the album and its %s, and moves their files to the recycle bin",
 			output.CountLabel(target.TrackCount, "track"))
 	} else {
 		printer.Warn("this removes the album and its %s from the catalog (the files are kept)",
@@ -241,7 +242,7 @@ func albumDetails(album albums.Album) string {
 
 func fileAction(deleteFiles bool) string {
 	if deleteFiles {
-		return "delete from disk"
+		return "move to the recycle bin"
 	}
 	return "keep on disk"
 }
@@ -302,6 +303,9 @@ DroppedNeedle stages metadata edits: a preview is created and its state is
 checked, and only then is it applied. Applying writes the new name through the
 library management pipeline, which rewrites the tags of the album's audio files,
 so the change is confirmed interactively unless --yes is given.
+
+The album's MusicBrainz identity must have been accepted first; the command
+refuses otherwise and names the reason.
 
 Use --dry-run to stage and validate the preview and then discard it without
 queuing any work. The new name must differ from the current one.`,

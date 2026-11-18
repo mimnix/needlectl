@@ -101,8 +101,8 @@ func isMusicBrainzHost(host string) bool {
 	return host == "musicbrainz.org" || strings.HasSuffix(host, ".musicbrainz.org")
 }
 
-// Resolver turns references into release-group MBIDs over the MusicBrainz web
-// service.
+// Resolver turns references into release-group MBIDs and tracklists over the
+// MusicBrainz web service.
 type Resolver struct {
 	// BaseURL is the service root, without a trailing slash.
 	BaseURL string
@@ -110,6 +110,11 @@ type Resolver struct {
 	HTTP *http.Client
 	// UserAgent identifies the application, as MusicBrainz requires.
 	UserAgent string
+	// Pace is the minimum delay between two requests. MusicBrainz asks clients
+	// to stay around one request per second; zero disables the delay.
+	Pace time.Duration
+
+	lastRequest time.Time
 }
 
 // NewResolver returns a resolver for the public MusicBrainz service.
@@ -118,6 +123,7 @@ func NewResolver() *Resolver {
 		BaseURL:   DefaultBaseURL,
 		HTTP:      &http.Client{Timeout: 30 * time.Second},
 		UserAgent: DefaultUserAgent,
+		Pace:      1100 * time.Millisecond,
 	}
 }
 
@@ -197,6 +203,7 @@ func (r *Resolver) get(ctx context.Context, path string) ([]byte, error) {
 	}
 
 	for attempt := 0; ; attempt++ {
+		r.pause(ctx)
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+path, nil)
 		if err != nil {
 			return nil, fmt.Errorf("build MusicBrainz request: %w", err)
@@ -225,6 +232,27 @@ func (r *Resolver) get(ctx context.Context, path string) ([]byte, error) {
 			return nil, fmt.Errorf("MusicBrainz answered %d for %s", resp.StatusCode, path)
 		}
 	}
+}
+
+// pause waits out the configured request interval.
+func (r *Resolver) pause(ctx context.Context) {
+	if r.Pace <= 0 {
+		return
+	}
+	wait := time.Duration(0)
+	if !r.lastRequest.IsZero() {
+		wait = r.Pace - time.Since(r.lastRequest)
+	}
+	if wait > 0 {
+		timer := time.NewTimer(wait)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return
+		case <-timer.C:
+		}
+	}
+	r.lastRequest = time.Now()
 }
 
 // userAgent returns the configured agent, falling back to the default.
