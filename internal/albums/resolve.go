@@ -10,7 +10,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/mimmo/needlectl/internal/matcher"
+	"github.com/mimnix/needlectl/internal/matcher"
 )
 
 // Album is a library album in the shape the resolver needs.

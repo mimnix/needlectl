@@ -8,8 +8,8 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/mimmo/needlectl/internal/api"
-	"github.com/mimmo/needlectl/internal/matcher"
+	"github.com/mimnix/needlectl/internal/api"
+	"github.com/mimnix/needlectl/internal/matcher"
 )
 
 // SourceTypeLocal is the source_type the API expects for a native library file.

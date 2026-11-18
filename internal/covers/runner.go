@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mimmo/needlectl/internal/api"
-	"github.com/mimmo/needlectl/internal/link"
-	"github.com/mimmo/needlectl/internal/output"
+	"github.com/mimnix/needlectl/internal/api"
+	"github.com/mimnix/needlectl/internal/link"
+	"github.com/mimnix/needlectl/internal/output"
 )
 
 // maxListedRepairs caps how many entries the plan prints unless verbose output

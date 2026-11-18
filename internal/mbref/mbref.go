@@ -25,7 +25,7 @@ const (
 	DefaultBaseURL = "https://musicbrainz.org"
 	// DefaultUserAgent identifies needlectl. MusicBrainz requires a meaningful
 	// User-Agent that carries a contact URL.
-	DefaultUserAgent = "needlectl (https://github.com/mimmo/needlectl)"
+	DefaultUserAgent = "needlectl (https://github.com/mimnix/needlectl)"
 
 	maxResponseBytes = 1 << 20
 	maxRetries       = 2

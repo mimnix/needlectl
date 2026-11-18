@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mimmo/needlectl/internal/api"
-	"github.com/mimmo/needlectl/internal/mbref"
+	"github.com/mimnix/needlectl/internal/api"
+	"github.com/mimnix/needlectl/internal/mbref"
 )
 
 func TestMissingAlbumsGroupsUnplayableEntries(t *testing.T) {

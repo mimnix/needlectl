@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mimmo/needlectl/internal/api"
-	"github.com/mimmo/needlectl/internal/matcher"
-	"github.com/mimmo/needlectl/internal/output"
+	"github.com/mimnix/needlectl/internal/api"
+	"github.com/mimnix/needlectl/internal/matcher"
+	"github.com/mimnix/needlectl/internal/output"
 )
 
 // fakeAPI is an in-memory DroppedNeedle used to exercise Runner end to end.

@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mimmo/needlectl/internal/api"
-	"github.com/mimmo/needlectl/internal/covers"
-	"github.com/mimmo/needlectl/internal/output"
+	"github.com/mimnix/needlectl/internal/api"
+	"github.com/mimnix/needlectl/internal/covers"
+	"github.com/mimnix/needlectl/internal/output"
 	"github.com/spf13/cobra"
 )
 

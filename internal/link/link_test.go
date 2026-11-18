@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mimmo/needlectl/internal/api"
-	"github.com/mimmo/needlectl/internal/matcher"
+	"github.com/mimnix/needlectl/internal/api"
+	"github.com/mimnix/needlectl/internal/matcher"
 )
 
 func TestIndexBuildsMatcherFromLibraryTracks(t *testing.T) {

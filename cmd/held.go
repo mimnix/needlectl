@@ -9,9 +9,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/mimmo/needlectl/internal/api"
-	"github.com/mimmo/needlectl/internal/mbref"
-	"github.com/mimmo/needlectl/internal/output"
+	"github.com/mimnix/needlectl/internal/api"
+	"github.com/mimnix/needlectl/internal/mbref"
+	"github.com/mimnix/needlectl/internal/output"
 	"github.com/spf13/cobra"
 )
 

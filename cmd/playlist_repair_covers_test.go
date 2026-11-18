@@ -3,7 +3,7 @@ package cmd
 import (
 	"testing"
 
-	"github.com/mimmo/needlectl/internal/covers"
+	"github.com/mimnix/needlectl/internal/covers"
 )
 
 func TestPlaylistRepairCoversValidate(t *testing.T) {

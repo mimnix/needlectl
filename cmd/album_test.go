@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/mimmo/needlectl/internal/albums"
-	"github.com/mimmo/needlectl/internal/api"
+	"github.com/mimnix/needlectl/internal/albums"
+	"github.com/mimnix/needlectl/internal/api"
 )
 
 func TestAlbumLabel(t *testing.T) {

@@ -1,4 +1,4 @@
-module github.com/mimmo/needlectl
+module github.com/mimnix/needlectl
 
 go 1.27
 

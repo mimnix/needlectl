@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mimmo/needlectl/internal/api"
-	"github.com/mimmo/needlectl/internal/output"
+	"github.com/mimnix/needlectl/internal/api"
+	"github.com/mimnix/needlectl/internal/output"
 )
 
 func TestTagEditModeMapsTheFlag(t *testing.T) {

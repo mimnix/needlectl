@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mimmo/needlectl/internal/api"
-	"github.com/mimmo/needlectl/internal/tracks"
+	"github.com/mimnix/needlectl/internal/api"
+	"github.com/mimnix/needlectl/internal/tracks"
 )
 
 func TestTrackLabel(t *testing.T) {

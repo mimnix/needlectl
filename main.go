@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	"github.com/mimmo/needlectl/cmd"
+	"github.com/mimnix/needlectl/cmd"
 )
 
 func main() {

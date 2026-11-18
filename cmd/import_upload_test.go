@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mimmo/needlectl/internal/api"
+	"github.com/mimnix/needlectl/internal/api"
 )
 
 func TestCollectUploadFilesTakesFileArguments(t *testing.T) {

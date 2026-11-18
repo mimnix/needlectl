@@ -10,9 +10,9 @@ package acquire
 import (
 	"strings"
 
-	"github.com/mimmo/needlectl/internal/api"
-	"github.com/mimmo/needlectl/internal/matcher"
-	"github.com/mimmo/needlectl/internal/mbref"
+	"github.com/mimnix/needlectl/internal/api"
+	"github.com/mimnix/needlectl/internal/matcher"
+	"github.com/mimnix/needlectl/internal/mbref"
 )
 
 // MissingAlbum groups the unplayable entries of a playlist that belong to one

@@ -10,7 +10,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/mimmo/needlectl/internal/matcher"
+	"github.com/mimnix/needlectl/internal/matcher"
 )
 
 // Track is a library track in the shape the resolver needs.

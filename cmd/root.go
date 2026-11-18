@@ -7,13 +7,13 @@ import (
 	"os"
 	"strings"
 
-	"github.com/mimmo/needlectl/internal/config"
-	"github.com/mimmo/needlectl/internal/output"
+	"github.com/mimnix/needlectl/internal/config"
+	"github.com/mimnix/needlectl/internal/output"
 	"github.com/spf13/cobra"
 )
 
 // version is overridden at build time with
-// -ldflags "-X github.com/mimmo/needlectl/cmd.version=<version>".
+// -ldflags "-X github.com/mimnix/needlectl/cmd.version=<version>".
 var version = "dev"
 
 // globalOptions holds the flags shared by every subcommand.

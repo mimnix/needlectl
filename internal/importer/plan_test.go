@@ -3,10 +3,10 @@ package importer
 import (
 	"testing"
 
-	"github.com/mimmo/needlectl/internal/api"
-	"github.com/mimmo/needlectl/internal/link"
-	"github.com/mimmo/needlectl/internal/matcher"
-	"github.com/mimmo/needlectl/internal/playlist"
+	"github.com/mimnix/needlectl/internal/api"
+	"github.com/mimnix/needlectl/internal/link"
+	"github.com/mimnix/needlectl/internal/matcher"
+	"github.com/mimnix/needlectl/internal/playlist"
 )
 
 func testRow(track, artist, album string) playlist.Row {

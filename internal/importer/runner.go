@@ -6,11 +6,11 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/mimmo/needlectl/internal/api"
-	"github.com/mimmo/needlectl/internal/link"
-	"github.com/mimmo/needlectl/internal/matcher"
-	"github.com/mimmo/needlectl/internal/output"
-	"github.com/mimmo/needlectl/internal/playlist"
+	"github.com/mimnix/needlectl/internal/api"
+	"github.com/mimnix/needlectl/internal/link"
+	"github.com/mimnix/needlectl/internal/matcher"
+	"github.com/mimnix/needlectl/internal/output"
+	"github.com/mimnix/needlectl/internal/playlist"
 )
 
 const defaultBatchSize = 100

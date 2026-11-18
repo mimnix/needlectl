@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/mimmo/needlectl/internal/api"
+	"github.com/mimnix/needlectl/internal/api"
 )
 
 func TestBuildPlanRepairsWrongAndMissingCovers(t *testing.T) {

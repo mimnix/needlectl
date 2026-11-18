@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mimmo/needlectl/internal/output"
-	"github.com/mimmo/needlectl/internal/relink"
+	"github.com/mimnix/needlectl/internal/output"
+	"github.com/mimnix/needlectl/internal/relink"
 )
 
 func TestPlaylistRelinkRequiresAnArgument(t *testing.T) {

@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mimmo/needlectl/internal/importer"
-	"github.com/mimmo/needlectl/internal/output"
+	"github.com/mimnix/needlectl/internal/importer"
+	"github.com/mimnix/needlectl/internal/output"
 )
 
 func TestDefaultPlaylistNameStripsExtension(t *testing.T) {

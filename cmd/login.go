@@ -8,9 +8,9 @@ import (
 	"os"
 	"strings"
 
-	"github.com/mimmo/needlectl/internal/api"
-	"github.com/mimmo/needlectl/internal/config"
-	"github.com/mimmo/needlectl/internal/output"
+	"github.com/mimnix/needlectl/internal/api"
+	"github.com/mimnix/needlectl/internal/config"
+	"github.com/mimnix/needlectl/internal/output"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )

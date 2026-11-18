@@ -11,8 +11,8 @@ package covers
 import (
 	"strings"
 
-	"github.com/mimmo/needlectl/internal/api"
-	"github.com/mimmo/needlectl/internal/link"
+	"github.com/mimnix/needlectl/internal/api"
+	"github.com/mimnix/needlectl/internal/link"
 )
 
 // Repair is one playlist entry whose stored cover URL is wrong or missing.

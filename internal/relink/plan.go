@@ -3,9 +3,9 @@
 package relink
 
 import (
-	"github.com/mimmo/needlectl/internal/api"
-	"github.com/mimmo/needlectl/internal/link"
-	"github.com/mimmo/needlectl/internal/matcher"
+	"github.com/mimnix/needlectl/internal/api"
+	"github.com/mimnix/needlectl/internal/link"
+	"github.com/mimnix/needlectl/internal/matcher"
 )
 
 // Relink describes one playlist entry that can be linked to a library track.
