@@ -18,16 +18,19 @@ type AuthResponse struct {
 
 // LibraryTrack is one entry of the native DroppedNeedle library.
 type LibraryTrack struct {
-	ID              string  `json:"id"`
-	Title           string  `json:"title"`
-	AlbumID         string  `json:"album_id"`
-	AlbumTitle      string  `json:"album_title"`
-	ArtistID        string  `json:"artist_id"`
-	ArtistName      string  `json:"artist_name"`
-	DiscNumber      int     `json:"disc_number"`
-	TrackNumber     int     `json:"track_number"`
-	DurationSeconds float64 `json:"duration_seconds"`
-	Format          string  `json:"format"`
+	ID      string `json:"id"`
+	Title   string `json:"title"`
+	AlbumID string `json:"album_id"`
+	// ReleaseGroupMBID is the MusicBrainz release group of the album. The cover
+	// endpoint takes this id; AlbumID is the local album id in v3.
+	ReleaseGroupMBID *string `json:"release_group_mbid"`
+	AlbumTitle       string  `json:"album_title"`
+	ArtistID         string  `json:"artist_id"`
+	ArtistName       string  `json:"artist_name"`
+	DiscNumber       int     `json:"disc_number"`
+	TrackNumber      int     `json:"track_number"`
+	DurationSeconds  float64 `json:"duration_seconds"`
+	Format           string  `json:"format"`
 	// CoverAvailable reports whether DroppedNeedle holds artwork for the album.
 	// It is the server's own signal and is not always exact (a rare false
 	// negative), but it keeps the generated cover links from 404ing.
@@ -99,6 +102,8 @@ type PlaylistSummary struct {
 	ID         string `json:"id"`
 	Name       string `json:"name"`
 	TrackCount int    `json:"track_count"`
+	IsOwner    bool   `json:"is_owner"`
+	IsRedacted bool   `json:"is_redacted"`
 }
 
 type playlistListResponse struct {
@@ -122,6 +127,9 @@ type PlaylistTrack struct {
 	TrackNumber      *int     `json:"track_number"`
 	DiscNumber       *int     `json:"disc_number"`
 	Duration         *float64 `json:"duration"`
+	Format           *string  `json:"format"`
+	RecordingMBID    *string  `json:"recording_mbid"`
+	PlexRatingKey    *string  `json:"plex_rating_key"`
 }
 
 // Linked reports whether the track entry is actually tied to a playable
@@ -160,6 +168,8 @@ type TrackInput struct {
 	TrackNumber      *int     `json:"track_number,omitempty"`
 	DiscNumber       *int     `json:"disc_number,omitempty"`
 	Duration         *int     `json:"duration,omitempty"`
+	RecordingMBID    *string  `json:"recording_mbid,omitempty"`
+	PlexRatingKey    *string  `json:"plex_rating_key,omitempty"`
 }
 
 type addTracksRequest struct {

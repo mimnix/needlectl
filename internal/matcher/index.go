@@ -8,6 +8,7 @@ type Track struct {
 	ID              string
 	Title           string
 	AlbumID         string
+	ReleaseGroupID  string
 	AlbumTitle      string
 	ArtistID        string
 	ArtistName      string

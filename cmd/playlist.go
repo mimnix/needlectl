@@ -18,6 +18,7 @@ func newPlaylistCommand(opts *globalOptions) *cobra.Command {
 		Short: "Inspect and manage playlists",
 	}
 	playlist.AddCommand(newPlaylistRelinkCommand(opts))
+	playlist.AddCommand(newPlaylistCoversCommand(opts))
 	return playlist
 }
 

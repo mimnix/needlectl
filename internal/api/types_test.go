@@ -68,6 +68,46 @@ func TestLibraryTrackReadsCoverAvailable(t *testing.T) {
 	}
 }
 
+func TestLibraryTrackReadsTheReleaseGroup(t *testing.T) {
+	var track LibraryTrack
+	raw := `{"id":"f1","album_id":"local-1","release_group_mbid":"rg-1"}`
+	if err := json.Unmarshal([]byte(raw), &track); err != nil {
+		t.Fatalf("unmarshal failed: %v", err)
+	}
+	if track.AlbumID != "local-1" {
+		t.Errorf("AlbumID = %q, want the local album id", track.AlbumID)
+	}
+	if track.ReleaseGroupMBID == nil || *track.ReleaseGroupMBID != "rg-1" {
+		t.Errorf("ReleaseGroupMBID = %v, want rg-1", track.ReleaseGroupMBID)
+	}
+
+	var without LibraryTrack
+	if err := json.Unmarshal([]byte(`{"id":"f2","release_group_mbid":null}`), &without); err != nil {
+		t.Fatalf("unmarshal failed: %v", err)
+	}
+	if without.ReleaseGroupMBID != nil {
+		t.Errorf("ReleaseGroupMBID = %v, want nil", *without.ReleaseGroupMBID)
+	}
+}
+
+func TestPlaylistTrackReadsFormatAndMBIDs(t *testing.T) {
+	raw := `{"id":"e1","format":"flac","recording_mbid":"rec-1","plex_rating_key":"plex-1"}`
+
+	var track PlaylistTrack
+	if err := json.Unmarshal([]byte(raw), &track); err != nil {
+		t.Fatalf("unmarshal failed: %v", err)
+	}
+	if track.Format == nil || *track.Format != "flac" {
+		t.Errorf("Format = %v, want flac", track.Format)
+	}
+	if track.RecordingMBID == nil || *track.RecordingMBID != "rec-1" {
+		t.Errorf("RecordingMBID = %v, want rec-1", track.RecordingMBID)
+	}
+	if track.PlexRatingKey == nil || *track.PlexRatingKey != "plex-1" {
+		t.Errorf("PlexRatingKey = %v, want plex-1", track.PlexRatingKey)
+	}
+}
+
 func TestLibraryTrackReadsRowRevision(t *testing.T) {
 	var track LibraryTrack
 	if err := json.Unmarshal([]byte(`{"id":"f1","row_revision":17}`), &track); err != nil {

@@ -74,18 +74,23 @@ func TestInputOmitsEmptyLibraryFields(t *testing.T) {
 	}
 }
 
-func TestCoverURLBuildsTheReleaseGroupLink(t *testing.T) {
-	library := matcher.Track{ID: "file-1", AlbumID: "cd98137e-68eb-57c4-9c76-7e875d3a0f03", CoverAvailable: true}
+func TestCoverURLUsesTheReleaseGroupNotTheLocalAlbum(t *testing.T) {
+	library := matcher.Track{
+		ID: "file-1",
+		// The local album id is NOT what the covers endpoint takes.
+		AlbumID:        "8a1f-local-album",
+		ReleaseGroupID: "cd98137e-68eb-57c4-9c76-7e875d3a0f03",
+	}
 
 	if got, want := CoverURL(library), "/api/v3/covers/release-group/cd98137e-68eb-57c4-9c76-7e875d3a0f03?size=250"; got != want {
 		t.Errorf("CoverURL = %q, want %q", got, want)
 	}
 }
 
-func TestCoverURLIsEmptyWhenThereIsNoCoverToLink(t *testing.T) {
+func TestCoverURLIsEmptyWhenThereIsNoReleaseGroup(t *testing.T) {
 	cases := map[string]matcher.Track{
-		"album without a cover":  {ID: "file-1", AlbumID: "rg-1", CoverAvailable: false},
-		"track without an album": {ID: "file-1", AlbumID: "", CoverAvailable: true},
+		"track without a release group": {ID: "file-1", AlbumID: "local-1"},
+		"empty track":                   {},
 	}
 	for name, library := range cases {
 		if got := CoverURL(library); got != "" {
@@ -94,18 +99,29 @@ func TestCoverURLIsEmptyWhenThereIsNoCoverToLink(t *testing.T) {
 	}
 }
 
-func TestInputCarriesTheCoverURLWhenTheAlbumHasOne(t *testing.T) {
+func TestCoverURLDoesNotDependOnLocalCoverAvailability(t *testing.T) {
+	// cover_available reports locally scanned art; the server also fetches art
+	// for the release group, so a false flag must not suppress the link.
+	library := matcher.Track{ID: "file-1", ReleaseGroupID: "rg-1", CoverAvailable: false}
+
+	if got, want := CoverURL(library), "/api/v3/covers/release-group/rg-1?size=250"; got != want {
+		t.Errorf("CoverURL = %q, want %q", got, want)
+	}
+}
+
+func TestInputCarriesTheCoverURLOfTheReleaseGroup(t *testing.T) {
 	input := Input("Disorder", "神崎エルザ", "Elza", matcher.Track{
-		ID: "file-1", AlbumID: "rg-1", CoverAvailable: true,
+		ID: "file-1", AlbumID: "local-1", ReleaseGroupID: "rg-1",
 	})
 
 	assertStringPointer(t, "CoverURL", input.CoverURL, "/api/v3/covers/release-group/rg-1?size=250")
+	assertStringPointer(t, "AlbumID", input.AlbumID, "local-1")
 }
 
-func TestIndexCarriesCoverAvailability(t *testing.T) {
+func TestIndexCarriesCoverAvailabilityAndReleaseGroup(t *testing.T) {
 	index := Index([]api.LibraryTrack{
-		{ID: "file-1", Title: "Disorder", ArtistName: "神崎エルザ", AlbumTitle: "Elza", AlbumID: "rg-1", CoverAvailable: true},
-		{ID: "file-2", Title: "Rising Hope", ArtistName: "LiSA", AlbumTitle: "Launcher", AlbumID: "rg-2"},
+		{ID: "file-1", Title: "Disorder", ArtistName: "神崎エルザ", AlbumTitle: "Elza", AlbumID: "local-1", ReleaseGroupMBID: strPtr("rg-1"), CoverAvailable: true},
+		{ID: "file-2", Title: "Rising Hope", ArtistName: "LiSA", AlbumTitle: "Launcher", AlbumID: "local-2"},
 	})
 
 	withCover, ok := index.Match("Disorder", "神崎エルザ", "Elza")
@@ -123,11 +139,14 @@ func TestIndexCarriesCoverAvailability(t *testing.T) {
 	if withoutCover.CoverAvailable {
 		t.Error("CoverAvailable was invented for file-2")
 	}
+	if withCover.ReleaseGroupID != "rg-1" {
+		t.Errorf("ReleaseGroupID = %q, want rg-1", withCover.ReleaseGroupID)
+	}
 	if got := CoverURL(withCover); got == "" {
 		t.Error("file-1 should produce a cover URL")
 	}
 	if got := CoverURL(withoutCover); got != "" {
-		t.Errorf("file-2 should not produce a cover URL, got %q", got)
+		t.Errorf("file-2 has no release group, got %q", got)
 	}
 }
 
@@ -224,3 +243,5 @@ func assertIntPointer(t *testing.T, name string, got *int, want int) {
 		t.Errorf("%s = %d, want %d", name, *got, want)
 	}
 }
+
+func strPtr(value string) *string { return &value }

@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestNewNormalizesBaseURL(t *testing.T) {
@@ -747,5 +749,60 @@ func writeJSON(t *testing.T, w http.ResponseWriter, payload any) {
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(payload); err != nil {
 		t.Fatalf("encode response: %v", err)
+	}
+}
+
+func TestDoReplaysARequestAfterRateLimit(t *testing.T) {
+	var (
+		requests int
+		bodies   []string
+	)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		data, _ := io.ReadAll(r.Body)
+		bodies = append(bodies, string(data))
+		if requests == 1 {
+			w.Header().Set("Retry-After", "0")
+			w.WriteHeader(http.StatusTooManyRequests)
+			writeJSON(t, w, map[string]any{"error": map[string]any{"code": "RATE_LIMITED", "message": "Too many requests"}})
+			return
+		}
+		writeJSON(t, w, map[string]any{"ok": true})
+	}))
+	defer server.Close()
+
+	client, err := New(server.URL, false)
+	if err != nil {
+		t.Fatalf("New returned error: %v", err)
+	}
+
+	if _, err := client.do(context.Background(), http.MethodPost, "/api/v3/probe", map[string]string{"name": "value"}); err != nil {
+		t.Fatalf("do returned error: %v", err)
+	}
+	if requests != 2 {
+		t.Fatalf("requests = %d, want 2", requests)
+	}
+	if bodies[0] != bodies[1] || !strings.Contains(bodies[1], `"name":"value"`) {
+		t.Errorf("replayed body = %q, first body = %q", bodies[1], bodies[0])
+	}
+}
+
+func TestRateLimitDelayHonoursRetryAfter(t *testing.T) {
+	cases := []struct {
+		header  string
+		attempt int
+		want    time.Duration
+	}{
+		{"0", 0, 0},
+		{"2", 0, 2 * time.Second},
+		{"120", 0, maxRateLimitDelay},
+		{"", 0, rateLimitFallback},
+		{"", 2, 2 * time.Second},
+		{"not-a-number", 1, time.Second},
+	}
+	for _, tc := range cases {
+		if got := rateLimitDelay(tc.header, tc.attempt); got != tc.want {
+			t.Errorf("rateLimitDelay(%q, %d) = %s, want %s", tc.header, tc.attempt, got, tc.want)
+		}
 	}
 }

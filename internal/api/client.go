@@ -542,39 +542,109 @@ func (c *Client) do(ctx context.Context, method, path string, body any) ([]byte,
 // doReader sends a request with an arbitrary body and returns the raw response
 // body. Keeping the multipart upload on the same path as the JSON calls means
 // authentication, timeouts and error decoding are handled in one place.
+//
+// DroppedNeedle limits how many requests a session may make per second. A 429
+// is answered with Retry-After; the request is replayed after that delay (the
+// server rejected it, so replaying cannot duplicate a write). Uploads stream a
+// pipe and cannot be replayed, so they surface the 429 instead.
 func (c *Client) doReader(ctx context.Context, method, path, contentType string, body io.Reader) ([]byte, error) {
-	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, body)
-	if err != nil {
-		return nil, fmt.Errorf("build request: %w", err)
-	}
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", c.userAgent)
-	if contentType != "" {
-		req.Header.Set("Content-Type", contentType)
-	}
-	if c.token != "" {
-		req.Header.Set("Authorization", "Bearer "+c.token)
-	}
-
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("%s %s: %w", method, path, err)
-	}
-	defer resp.Body.Close()
-
-	data, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseSize))
-	if err != nil {
-		return nil, fmt.Errorf("read response from %s: %w", path, err)
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, &Error{
-			StatusCode: resp.StatusCode,
-			Method:     method,
-			Path:       path,
-			Detail:     extractDetail(data),
+	for attempt := 0; ; attempt++ {
+		req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, body)
+		if err != nil {
+			return nil, fmt.Errorf("build request: %w", err)
 		}
+		req.Header.Set("Accept", "application/json")
+		req.Header.Set("User-Agent", c.userAgent)
+		if contentType != "" {
+			req.Header.Set("Content-Type", contentType)
+		}
+		if c.token != "" {
+			req.Header.Set("Authorization", "Bearer "+c.token)
+		}
+
+		resp, err := c.http.Do(req)
+		if err != nil {
+			return nil, fmt.Errorf("%s %s: %w", method, path, err)
+		}
+
+		if resp.StatusCode == http.StatusTooManyRequests && attempt < maxRateLimitRetries && replayable(body) {
+			delay := rateLimitDelay(resp.Header.Get("Retry-After"), attempt)
+			_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxResponseSize))
+			resp.Body.Close()
+			if err := rewind(body); err != nil {
+				return nil, fmt.Errorf("replay %s %s: %w", method, path, err)
+			}
+
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(delay):
+			}
+			continue
+		}
+
+		data, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseSize))
+		resp.Body.Close()
+		if err != nil {
+			return nil, fmt.Errorf("read response from %s: %w", path, err)
+		}
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			return nil, &Error{
+				StatusCode: resp.StatusCode,
+				Method:     method,
+				Path:       path,
+				Detail:     extractDetail(data),
+			}
+		}
+		return data, nil
 	}
-	return data, nil
+}
+
+// Rate-limit backoff: at most a handful of replays, never waiting longer than
+// half a minute for one of them.
+const (
+	maxRateLimitRetries = 5
+	rateLimitFallback   = 500 * time.Millisecond
+	maxRateLimitDelay   = 30 * time.Second
+)
+
+// replayable reports whether a request body can be sent again.
+func replayable(body io.Reader) bool {
+	if body == nil {
+		return true
+	}
+	_, ok := body.(io.Seeker)
+	return ok
+}
+
+// rewind puts a replayable body back at its start.
+func rewind(body io.Reader) error {
+	if body == nil {
+		return nil
+	}
+	seeker, ok := body.(io.Seeker)
+	if !ok {
+		return errors.New("request body cannot be replayed")
+	}
+	_, err := seeker.Seek(0, io.SeekStart)
+	return err
+}
+
+// rateLimitDelay reads Retry-After (whole seconds), falling back to an
+// exponential backoff when the server does not send it.
+func rateLimitDelay(header string, attempt int) time.Duration {
+	if seconds, err := strconv.Atoi(strings.TrimSpace(header)); err == nil && seconds >= 0 {
+		delay := time.Duration(seconds) * time.Second
+		if delay > maxRateLimitDelay {
+			return maxRateLimitDelay
+		}
+		return delay
+	}
+	delay := rateLimitFallback << attempt
+	if delay > maxRateLimitDelay {
+		return maxRateLimitDelay
+	}
+	return delay
 }
 
 // extractDetail pulls the FastAPI "detail" field out of an error body, falling

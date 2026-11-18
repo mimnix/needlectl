@@ -39,6 +39,9 @@ were imported before the track was available are relinked once it appears.
 - **Playlist relinking** — `needlectl playlist relink` scans an existing playlist
   and links the entries that have no source yet to matching library files. Entries
   that already play are left untouched, so a working link is never replaced.
+- **Cover repair** — `needlectl playlist covers` re-links the artwork of entries
+  whose stored cover URL is missing or points at the local album id instead of the
+  album's MusicBrainz release group.
 - **Track upload** — `needlectl import tracks` uploads audio files to
   DroppedNeedle's drop import and reports how the server identified each group;
   entries it could not identify are listed as `needs_review`.
@@ -531,9 +534,11 @@ Linked entries also carry the album's **cover art**. DroppedNeedle stores the
 artwork reference on the playlist row itself and never derives one from the
 library file, so an entry created without it shows no cover — and the playlist's
 own cover is assembled from those same per-track references. `needlectl` sets
-`cover_url` to `/api/v3/covers/release-group/<album id>?size=250` whenever the
-matched library track reports `cover_available`, so imported and relinked tracks
-get artwork. Albums with no artwork in DroppedNeedle stay without one.
+`cover_url` to `/api/v3/covers/release-group/<release group mbid>?size=250` from
+the matched library track's `release_group_mbid`, so imported and relinked tracks
+get artwork. `cover_available` is deliberately not a gate: it reports locally
+scanned art, while the covers route also fetches art for the release group.
+Entries with a missing or wrong URL can be fixed with `playlist covers`.
 
 Flags:
 
@@ -625,6 +630,50 @@ Flags:
 |------|---------|-------------|
 | `--yes` | `false` | Do not ask for confirmation (required when stdin is not a terminal). |
 | `--dry-run` | `false` | Resolve the reference and show what would be imported without importing it. |
+
+### `needlectl playlist covers [playlist] | --all`
+
+Repairs the album artwork shown on a playlist's tracks.
+
+DroppedNeedle stores a cover URL on every playlist entry and never derives one
+from the linked library file. Entries added while the album had no artwork, or
+linked with an older needlectl that used the local album id, keep showing no
+cover even after the art arrives. This command compares each linked entry with
+its album's MusicBrainz release group and stores the correct artwork URL.
+
+The API cannot patch `cover_url` (only `source_type` and `available_sources` are
+writable), so an entry that needs repair is re-added at its position and the old
+one removed. Playlist order is preserved; only entries linked to the local
+library are touched.
+
+```
+$ needlectl playlist covers Anime --dry-run
+› Authenticating with https://music.example.com
+✓ Signed in as Admin (admin)
+› Loading DroppedNeedle library
+  1582 tracks indexed
+› Checking covers of "Anime"
+  66 entries · 42 to repair · 24 already right · 0 not in the library · 0 without a release group
+  ~ Disorder — 神崎エルザ
+  ~ Rising Hope — LiSA
+  …
+✓ Dry run complete — no changes were made
+  playlist:    Anime
+  tracks:      66
+  to repair:   42
+  unchanged:   24
+```
+
+Run it without `--dry-run` to apply the repairs. `--all` repairs every playlist
+you own and prints one line per playlist.
+
+Flags:
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--id` | `false` | Treat the argument as an exact playlist id instead of a name. |
+| `--all` | `false` | Repair every playlist you own. Cannot be combined with a playlist argument. |
+| `--dry-run` | `false` | Show what would be repaired without modifying any playlist. |
 
 ## CSV format
 
@@ -788,11 +837,12 @@ Authentication uses `Authorization: Bearer <token>`. An entry is considered
 >
 > `cover_url` on a playlist entry is **client-supplied and stored verbatim**:
 > neither `POST /playlists/{id}/tracks` nor `resolve-sources` derives artwork from
-> the linked library file. The playlist cover list is built from those same
-> per-track values (`SELECT DISTINCT cover_url … LIMIT 4`), so entries added
+> the linked library file, and `PATCH /playlists/{id}/tracks/{id}` ignores it
+> (only source fields are writable). The playlist cover list is built from those
+> same per-track values (`SELECT DISTINCT cover_url … LIMIT 4`), so entries added
 > without a cover contribute neither per-track art nor a playlist image.
-> `/api/v3/covers/release-group/{id}` takes the album's MusicBrainz release-group
-> id, which is the `album_id` of a library track.
+> `/api/v3/covers/release-group/{id}` takes the **MusicBrainz release-group id**
+> (`release_group_mbid` of a library track), not the local `album_id`.
 >
 > Library management (used by `album rename` and `track rename`) must be active
 > on the instance. Its
@@ -859,6 +909,7 @@ internal/
   tracks/                    track query resolution (unique-match only)
   mbref/                     MusicBrainz reference parsing + release→group lookup
   relink/                    playlist relink plan + orchestration
+  covers/                    playlist cover repair plan + orchestration
   importer/                  pure import plan + orchestration
   output/                    coloured, structured terminal output
 ```

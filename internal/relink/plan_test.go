@@ -37,7 +37,7 @@ func TestBuildPlanSelectsOnlyUnplayableEntriesFoundInTheLibrary(t *testing.T) {
 	}
 	index := testIndex(matcher.Track{
 		ID: "file-1", Title: "Disorder", ArtistName: "神崎エルザ", AlbumTitle: "Elza",
-		AlbumID: "rg-1", ArtistID: "ar-1", TrackNumber: 4, DurationSeconds: 215, Format: "FLAC",
+		AlbumID: "local-1", ReleaseGroupID: "rg-1", ArtistID: "ar-1", TrackNumber: 4, DurationSeconds: 215, Format: "FLAC",
 		CoverAvailable: true,
 	})
 

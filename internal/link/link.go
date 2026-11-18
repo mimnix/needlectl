@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"strings"
 
 	"github.com/mimmo/needlectl/internal/api"
 	"github.com/mimmo/needlectl/internal/matcher"
@@ -25,6 +26,7 @@ func Index(tracks []api.LibraryTrack) *matcher.Index {
 			ID:              track.ID,
 			Title:           track.Title,
 			AlbumID:         track.AlbumID,
+			ReleaseGroupID:  derefString(track.ReleaseGroupMBID),
 			AlbumTitle:      track.AlbumTitle,
 			ArtistID:        track.ArtistID,
 			ArtistName:      track.ArtistName,
@@ -39,17 +41,30 @@ func Index(tracks []api.LibraryTrack) *matcher.Index {
 }
 
 // CoverURL returns the DroppedNeedle artwork URL for the album of a library
-// track, or "" when no cover is known to exist.
+// track, or "" when the track has no release group.
 //
 // Playlist entries store the artwork reference themselves and the server never
 // derives one from the library file, so an entry added without this URL shows no
-// cover. The album id of a library track is its MusicBrainz release-group id,
-// which is exactly what the covers endpoint expects.
+// cover.
+//
+// The covers endpoint takes the MusicBrainz release-group id, not the local
+// album id: in v3 a library track's AlbumID is the local album and its
+// ReleaseGroupMBID is the id to link. CoverAvailable is not a reliable gate
+// either — it reflects locally scanned art, while the cover endpoint also
+// fetches art for the release group, so it is true for albums that would show a
+// cover.
 func CoverURL(library matcher.Track) string {
-	if library.AlbumID == "" || !library.CoverAvailable {
+	return CoverURLForReleaseGroup(library.ReleaseGroupID)
+}
+
+// CoverURLForReleaseGroup builds the artwork URL for one MusicBrainz release
+// group, or returns "" when the id is empty.
+func CoverURLForReleaseGroup(releaseGroupID string) string {
+	trimmed := stringValue(releaseGroupID)
+	if trimmed == "" {
 		return ""
 	}
-	return "/api/v3/covers/release-group/" + url.PathEscape(library.AlbumID) + "?size=" + coverSize
+	return "/api/v3/covers/release-group/" + url.PathEscape(trimmed) + "?size=" + coverSize
 }
 
 // Input builds the add-tracks payload that links a playlist entry to library.
@@ -99,6 +114,17 @@ func Replace(ctx context.Context, client Replacer, playlistID string, existing a
 		return fmt.Errorf("remove replaced entry (a duplicate may remain): %w", err)
 	}
 	return nil
+}
+
+func derefString(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
+}
+
+func stringValue(value string) string {
+	return strings.TrimSpace(value)
 }
 
 func stringPointer(value string) *string {
