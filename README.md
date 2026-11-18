@@ -1,6 +1,8 @@
 # needlectl
 
-![needlectl logo](assets/logo.png)
+<p align="center">
+  <img src="assets/logo.png" alt="needlectl logo">
+</p>
 
 `needlectl` is a command-line client for a self-hosted [DroppedNeedle](https://www.droppedneedle.com/)
 instance. It talks to DroppedNeedle over its REST API (`/api/v3`) and manages the
