@@ -157,7 +157,7 @@ func resolveAlbumTarget(cmd *cobra.Command, printer *output.Printer, client *api
 		if errors.As(err, &ambiguous) {
 			printer.Warn("%q matches %d albums:", argument, len(ambiguous.Matches))
 			for _, match := range ambiguous.Matches {
-				printer.Info("%s  %s", match.ID, albumLabel(match))
+				printer.Info("%s  %s", match.ID, albumCandidateLabel(match))
 			}
 			return albums.Album{}, errors.New("refusing to guess: narrow the search with --artist or pass --id")
 		}
@@ -212,6 +212,20 @@ func albumLabel(album albums.Album) string {
 		return album.Title
 	}
 	return fmt.Sprintf("%s — %s", album.Title, album.ArtistName)
+}
+
+// albumCandidateLabel describes one ambiguous album match. Copies of an album
+// share the title and artist, so the track count and format are what tell them
+// apart when the caller has to pick one by id.
+func albumCandidateLabel(album albums.Album) string {
+	parts := []string{albumLabel(album)}
+	if album.TrackCount > 0 {
+		parts = append(parts, output.CountLabel(album.TrackCount, "track"))
+	}
+	if details := albumDetails(album); details != "" {
+		parts = append(parts, details)
+	}
+	return strings.Join(parts, " · ")
 }
 
 func albumDetails(album albums.Album) string {

@@ -35,6 +35,31 @@ func TestAlbumDetails(t *testing.T) {
 	}
 }
 
+func TestAlbumCandidateLabelDistinguishesCopies(t *testing.T) {
+	cases := []struct {
+		album albums.Album
+		want  string
+	}{
+		{
+			albums.Album{Title: "The End Is Where We Begin", ArtistName: "Thousand Foot Krutch", TrackCount: 24, Format: "mp3", Year: 2012},
+			"The End Is Where We Begin — Thousand Foot Krutch · 24 tracks · mp3 · 2012",
+		},
+		{
+			albums.Album{Title: "The End Is Where We Begin", ArtistName: "Thousand Foot Krutch", TrackCount: 1, Format: "flac", Year: 2024},
+			"The End Is Where We Begin — Thousand Foot Krutch · 1 track · flac · 2024",
+		},
+		{
+			albums.Album{Title: "Solo"},
+			"Solo",
+		},
+	}
+	for _, tc := range cases {
+		if got := albumCandidateLabel(tc.album); got != tc.want {
+			t.Errorf("albumCandidateLabel(%+v) = %q, want %q", tc.album, got, tc.want)
+		}
+	}
+}
+
 func TestFileAndWantedActions(t *testing.T) {
 	if fileAction(true) != "delete from disk" || fileAction(false) != "keep on disk" {
 		t.Errorf("fileAction = %q / %q", fileAction(true), fileAction(false))
