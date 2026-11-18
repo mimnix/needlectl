@@ -1,5 +1,7 @@
 # needlectl
 
+![needlectl logo](assets/logo.png)
+
 `needlectl` is a command-line client for a self-hosted [DroppedNeedle](https://www.droppedneedle.com/)
 instance. It talks to DroppedNeedle over its REST API (`/api/v3`) and manages the
 native library and playlists: importing CSV playlists (such as a Spotify library
@@ -966,7 +968,7 @@ main.go                      entry point (calls cmd.Execute)
 cmd/
   root.go                    root command, global flags, config loading
   login.go                   interactive login
-  import.go                  import command group (legacy CSV alias + subcommands)
+  import.go                  import command group (upload + list)
   import_playlist.go         CSV playlist import
   import_upload.go           upload audio files
   import_list.go             list import batches and their entries
@@ -991,6 +993,8 @@ internal/
   acquire/                   missing-track album resolution + requests
   importer/                  pure import plan + orchestration
   output/                    coloured, structured terminal output
+assets/
+  logo.png                   project logo, shown at the top of this README
 ```
 
 The decision logic is pure and is the main unit-test target:
