@@ -75,7 +75,7 @@ mise, install Go 1.27+ yourself and run the `go` commands directly.
 ## Installation
 
 ```bash
-git clone <repository-url> needlectl
+git clone https://github.com/mimnix/needlectl.git
 cd needlectl
 mise install      # installs the Go toolchain pinned in mise.toml
 mise run build    # produces ./bin/needlectl
@@ -86,6 +86,41 @@ Optionally install it onto your `PATH`:
 ```bash
 mise run install  # go install .
 ```
+
+Or install a released version straight from GitHub:
+
+```bash
+go install github.com/mimnix/needlectl@latest
+```
+
+## Releases
+
+Releases are cut from `vX.Y.Z` tags; pushing a tag runs
+[`.github/workflows/release.yml`](.github/workflows/release.yml), which:
+
+1. rejects tags that are not exactly `vX.Y.Z` (no leading zeros, no suffix) or
+   that do not point at a commit on `main`;
+2. runs `go vet`, a `gofmt` check and the test suite;
+3. builds `linux`, `darwin` and `windows` archives for `amd64` and `arm64`,
+   with the tag baked into `needlectl --version`;
+4. publishes a GitHub release whose body is
+   [`docs/releases/<tag>.md`](docs/releases/), with the archives, `SHA256SUMS`,
+   the release notes and `CHANGELOG.md` attached.
+
+Tagging a release:
+
+```bash
+# 1. move the Unreleased entries in CHANGELOG.md into ## [X.Y.Z]
+# 2. write docs/releases/vX.Y.Z.md from docs/releases/TEMPLATE.md
+git add -A && git commit -m "chore: release vX.Y.Z"
+git push origin main
+git tag -a vX.Y.Z -m "needlectl vX.Y.Z"
+git push origin vX.Y.Z
+```
+
+The full checklist and the validation rules are in
+[`docs/releases/README.md`](docs/releases/README.md); the complete history is in
+[`CHANGELOG.md`](CHANGELOG.md).
 
 ## Quick start
 
@@ -966,7 +1001,10 @@ mise run ci         # lint + test:race + build
 ### Project layout
 
 ```
+.github/
+  workflows/release.yml      tag-driven release: validate, test, build, publish
 main.go                      entry point (calls cmd.Execute)
+CHANGELOG.md                 complete technical history (Keep a Changelog)
 cmd/
   root.go                    root command, global flags, config loading
   login.go                   interactive login
@@ -995,6 +1033,11 @@ internal/
   acquire/                   missing-track album resolution + requests
   importer/                  pure import plan + orchestration
   output/                    coloured, structured terminal output
+docs/
+  releases/                  one Markdown file per release, used as release body
+scripts/
+  release/build.sh           cross-compile archives + SHA256SUMS
+  release/notes.sh           compose the release body from docs + CHANGELOG
 assets/
   logo.png                   project logo, shown at the top of this README
 ```

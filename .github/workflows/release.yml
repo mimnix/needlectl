@@ -1,0 +1,89 @@
+name: release
+
+# Publishes a GitHub release when a vX.Y.Z tag is pushed. The tag must point at
+# a commit on main and must have a notes file in docs/releases/.
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CGO_ENABLED: '0'
+  GH_TOKEN: ${{ github.token }}
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the tagged commit
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate the tag
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "::error::'$TAG' is not a vX.Y.Z tag (no leading zeros, no suffix)"
+            exit 1
+          fi
+          if [ ! -f "docs/releases/$TAG.md" ]; then
+            echo "::error::missing release notes: docs/releases/$TAG.md"
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::$TAG does not point at a commit on main"
+            exit 1
+          fi
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "::error::a release for $TAG already exists"
+            exit 1
+          fi
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Lint
+        run: |
+          set -euo pipefail
+          go vet ./...
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "::error::these files are not gofmt-formatted:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Test
+        run: go test ./...
+
+      - name: Build archives
+        run: scripts/release/build.sh "${{ github.ref_name }}"
+
+      - name: Compose release notes
+        run: scripts/release/notes.sh "${{ github.ref_name }}" > dist/RELEASE_NOTES.md
+
+      - name: Publish the release
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          cp "docs/releases/$TAG.md" "dist/needlectl_${TAG}.md"
+          cp CHANGELOG.md dist/CHANGELOG.md
+          gh release create "$TAG" dist/* \
+            --title "needlectl $TAG" \
+            --notes-file dist/RELEASE_NOTES.md \
+            --verify-tag
