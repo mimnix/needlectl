@@ -1077,10 +1077,11 @@ exports and `~/.needlectl.conf` private.
   still has to be corrected in the web UI or by deleting and re-uploading.
 - The password is stored in plain text in a `0600` file; an OS keyring backend
   would remove that class of risk.
-- The commands implemented so far are `login`, `import` (`playlist`, `files`,
-  `match`, `jobs`), `album delete`, `album rename`, `track delete`,
-  `track rename` and `playlist relink`.
+- The commands implemented so far are `login`, `playlist import`, `playlist
+  relink`, `playlist repair-covers`, `playlist request`, `import upload`,
+  `import list`, `held list`, `held match`, `album delete`, `album rename`,
+  `track delete` and `track rename`.
 
 ## License
 
-Not yet specified.
+Released under the [MIT License](LICENSE). © 2026 mimnix.
